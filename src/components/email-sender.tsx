@@ -1,0 +1,181 @@
+"use client";
+
+import { useRef, useState } from "react";
+import { useAppState } from "./app-state";
+import { RecipientList } from "./recipient-list";
+import { TemplateEditor } from "./template-editor";
+import { SmtpSettings } from "./smtp-settings";
+import { SendModal } from "./send-monitor-modal";
+import { renderTemplate } from "@/lib/template";
+import { formatDuration } from "@/lib/format";
+import type { Prospect, SendStatus } from "@/lib/types";
+
+type Phase = "idle" | "confirm" | "sending" | "done";
+
+async function sendEmail(r: Prospect, subject: string, body: string): Promise<boolean> {
+  try {
+    const res = await fetch("/api/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: r.correo,
+        subject: renderTemplate(subject, r),
+        body: renderTemplate(body, r),
+      }),
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return data?.success === true;
+  } catch {
+    return false;
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function EmailSender() {
+  const { recipients, clearRecipients } = useAppState();
+  const [subject, setSubject] = useState("Propuesta de colaboración para {{empresa}}");
+  const [body, setBody] = useState(
+    "Hola {{nombre}},\n\nMe presento desde la Suite de Prospección. Nos gustaría conversar sobre cómo podemos ayudar a {{empresa}} en {{ciudad}}.\n\nSaludos cordiales."
+  );
+  const [delaySec, setDelaySec] = useState(4);
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [progress, setProgress] = useState<SendStatus>({
+    total: 0,
+    sent: 0,
+    failed: 0,
+    pending: 0,
+    current: 0,
+  });
+  const cancelRef = useRef(false);
+
+  const total = recipients.length;
+  const estimated = formatDuration(total * delaySec);
+
+  async function onConfirm() {
+    if (phase === "sending") return;
+    cancelRef.current = false;
+    setPhase("sending");
+
+    const list = recipients;
+    setProgress({ total: list.length, sent: 0, failed: 0, pending: list.length, current: 0 });
+
+    for (let i = 0; i < list.length; i++) {
+      if (cancelRef.current) break;
+      const r = list[i];
+      setProgress((p) => ({ ...p, current: i + 1, pending: Math.max(0, p.pending - 1) }));
+      const ok = await sendEmail(r, subject, body);
+      setProgress((p) => (ok ? { ...p, sent: p.sent + 1 } : { ...p, failed: p.failed + 1 }));
+      if (i < list.length - 1) await sleep(delaySec * 1000);
+    }
+
+    setPhase("done");
+  }
+
+  function onCancel() {
+    cancelRef.current = true;
+  }
+
+  function onClose() {
+    setPhase("idle");
+    setProgress({ total: 0, sent: 0, failed: 0, pending: 0, current: 0 });
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="animate-fade-up rounded-2xl border border-slate-800 bg-[#0f172a] p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-100">Emisor de Correos Masivos</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Recibe prospectos desde el buscador o carga un CSV.
+            </p>
+          </div>
+          {total > 0 && (
+            <button
+              onClick={clearRecipients}
+              className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-400 transition hover:bg-slate-800 hover:text-slate-200"
+            >
+              Limpiar lista
+            </button>
+          )}
+        </div>
+        <div className="mt-5">
+          <RecipientList />
+        </div>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div className="animate-fade-up">
+          <TemplateEditor subject={subject} onSubject={setSubject} body={body} onBody={setBody} />
+        </div>
+        <div className="space-y-6">
+          <AntiSpam delaySec={delaySec} onDelay={setDelaySec} />
+          <SmtpSettings />
+        </div>
+      </div>
+
+      <div className="animate-fade-up flex items-center justify-between rounded-2xl border border-slate-800 bg-[#0f172a] p-6">
+        <div className="text-sm text-slate-400">
+          <p>
+            {total} destinatario{total === 1 ? "" : "s"} listado{total === 1 ? "" : "s"}
+          </p>
+          <p className="text-xs text-slate-600">Tiempo estimado: {estimated}</p>
+        </div>
+        <button
+          onClick={() => setPhase("confirm")}
+          disabled={total === 0}
+          className="rounded-xl bg-emerald-500 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-400 disabled:opacity-50"
+        >
+          Enviar Correos
+        </button>
+      </div>
+
+      {phase !== "idle" && (
+        <SendModal
+          mode={phase === "confirm" ? "confirm" : phase === "sending" ? "sending" : "done"}
+          total={total}
+          delaySec={delaySec}
+          progress={progress}
+          onConfirm={onConfirm}
+          onCancel={onCancel}
+          onClose={onClose}
+        />
+      )}
+    </div>
+  );
+}
+
+function AntiSpam({ delaySec, onDelay }: { delaySec: number; onDelay: (n: number) => void }) {
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-[#0f172a] p-6">
+      <h3 className="text-sm font-semibold text-slate-100">Ajustes Anti-Spam</h3>
+      <p className="mt-1 text-xs text-slate-500">
+        Retraso entre envíos para evitar ser marcado como spam.
+      </p>
+      <div className="mt-4 flex items-center gap-4">
+        <input
+          type="range"
+          min={3}
+          max={5}
+          step={1}
+          value={delaySec}
+          onChange={(e) => onDelay(Number(e.target.value))}
+          className="flex-1 accent-emerald-500"
+          aria-label="Retraso entre envíos en segundos"
+        />
+        <span className="w-24 rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-1.5 text-center text-sm text-slate-200">
+          {delaySec} s
+        </span>
+      </div>
+      <div className="mt-2 flex justify-between text-[11px] text-slate-600">
+        <span>3 s (rápido)</span>
+        <span>4 s (equilibrado)</span>
+        <span>5 s (prudente)</span>
+      </div>
+    </div>
+  );
+}
