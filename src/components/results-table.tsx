@@ -55,15 +55,19 @@ export function ResultsTable() {
                   <td className="px-3 py-3 text-slate-300">{p.correo}</td>
                   <td className="px-3 py-3 text-slate-300">{p.telefono}</td>
                   <td className="px-3 py-3">
-                    <a
-                      href={`https://wa.me/${formatPhoneForWa(p.whatsapp)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/15 px-2.5 py-1 text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/25"
-                    >
-                      WhatsApp
-                    </a>
+                    {p.whatsapp ? (
+                      <a
+                        href={`https://wa.me/${formatPhoneForWa(p.whatsapp)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/15 px-2.5 py-1 text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/25"
+                      >
+                        WhatsApp
+                      </a>
+                    ) : (
+                      <span className="text-xs text-slate-600">—</span>
+                    )}
                   </td>
                   <td className="px-3 py-3">
                     <a
@@ -77,15 +81,19 @@ export function ResultsTable() {
                     </a>
                   </td>
                   <td className="px-3 py-3">
-                    <a
-                      href={p.website}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="text-sky-400 hover:underline"
-                    >
-                      {p.website.replace(/^https?:\/\//, "")}
-                    </a>
+                    {p.website ? (
+                      <a
+                        href={p.website}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-sky-400 hover:underline"
+                      >
+                        {p.website.replace(/^https?:\/\//, "")}
+                      </a>
+                    ) : (
+                      <span className="text-xs text-slate-600">No disponible</span>
+                    )}
                   </td>
                 </tr>
               );
