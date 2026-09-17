@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   DEFAULT_APIFY_ACTOR,
+  DEFAULT_EMAIL_ACTOR,
   clearProviderKeys,
   getProvidersSnapshot,
   getServerProvidersSnapshot,
@@ -34,6 +35,7 @@ function ProviderSettingsPanel({ open, onClose }: { open: boolean; onClose: () =
   );
   const [apifyToken, setApifyToken] = useState(config.apifyToken);
   const [apifyActor, setApifyActor] = useState(config.apifyActor || DEFAULT_APIFY_ACTOR);
+  const [emailActor, setEmailActor] = useState(config.emailActor || DEFAULT_EMAIL_ACTOR);
   const [googleKey, setGoogleKey] = useState(config.googleKey);
   const [msg, setMsg] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -51,6 +53,7 @@ function ProviderSettingsPanel({ open, onClose }: { open: boolean; onClose: () =
       engine: config.engine,
       apifyToken,
       apifyActor,
+      emailActor,
       googleKey,
     };
     saveProviderConfig(next);
@@ -61,6 +64,7 @@ function ProviderSettingsPanel({ open, onClose }: { open: boolean; onClose: () =
     clearProviderKeys();
     setApifyToken("");
     setApifyActor(DEFAULT_APIFY_ACTOR);
+    setEmailActor(DEFAULT_EMAIL_ACTOR);
     setGoogleKey("");
     setMsg("Claves de API eliminadas del dispositivo.");
   }
@@ -125,6 +129,21 @@ function ProviderSettingsPanel({ open, onClose }: { open: boolean; onClose: () =
               placeholder={DEFAULT_APIFY_ACTOR}
               className="w-full rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 outline-none focus:border-sky-500"
             />
+          </label>
+          <label className="mt-3 block">
+            <span className="mb-1.5 block text-xs font-medium text-slate-400">
+              Actor de extracción de correos (sitios web)
+            </span>
+            <input
+              value={emailActor}
+              onChange={(e) => setEmailActor(e.target.value)}
+              placeholder={DEFAULT_EMAIL_ACTOR}
+              className="w-full rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 outline-none focus:border-sky-500"
+            />
+            <span className="mt-1 block text-[11px] text-slate-500">
+              Se usa para escanear las URLs de la columna “Sitio Web” y extraer correos. Si no hay
+              API Key, se usa el extractor HTML local sin costo.
+            </span>
           </label>
         </ProviderCard>
 

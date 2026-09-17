@@ -8,15 +8,19 @@ export interface ProviderConfig {
   engine: EngineId;
   apifyToken: string;
   apifyActor: string;
+  emailActor: string;
   googleKey: string;
 }
 
 export const DEFAULT_APIFY_ACTOR = "compass/crawler-google-places";
 
+export const DEFAULT_EMAIL_ACTOR = "vdrmota/contact-info-scraper";
+
 export const DEFAULT_PROVIDER_CONFIG: ProviderConfig = {
   engine: "free",
   apifyToken: "",
   apifyActor: DEFAULT_APIFY_ACTOR,
+  emailActor: DEFAULT_EMAIL_ACTOR,
   googleKey: "",
 };
 
@@ -67,6 +71,9 @@ function readConfig(): ProviderConfig {
       apifyActor:
         (typeof parsed.apifyActor === "string" ? parsed.apifyActor : "") ||
         DEFAULT_APIFY_ACTOR,
+      emailActor:
+        (typeof parsed.emailActor === "string" ? parsed.emailActor : "") ||
+        DEFAULT_EMAIL_ACTOR,
       googleKey: deobfuscate(typeof parsed.googleKey === "string" ? parsed.googleKey : ""),
     };
   } catch {
@@ -104,6 +111,7 @@ export function saveProviderConfig(config: ProviderConfig): void {
     engine: config.engine,
     apifyToken: config.apifyToken.trim(),
     apifyActor: config.apifyActor.trim() || DEFAULT_APIFY_ACTOR,
+    emailActor: config.emailActor.trim() || DEFAULT_EMAIL_ACTOR,
     googleKey: config.googleKey.trim(),
   };
   cache = next;
@@ -115,6 +123,7 @@ export function saveProviderConfig(config: ProviderConfig): void {
           engine: next.engine,
           apifyToken: obfuscate(next.apifyToken),
           apifyActor: next.apifyActor,
+          emailActor: next.emailActor,
           googleKey: obfuscate(next.googleKey),
         })
       );
@@ -130,6 +139,7 @@ export function clearProviderKeys(): void {
     engine: getProvidersSnapshot().engine,
     apifyToken: "",
     apifyActor: DEFAULT_APIFY_ACTOR,
+    emailActor: DEFAULT_EMAIL_ACTOR,
     googleKey: "",
   });
 }

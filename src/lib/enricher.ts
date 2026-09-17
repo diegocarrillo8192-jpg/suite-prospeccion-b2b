@@ -323,7 +323,7 @@ function stripEmpty(social: SocialLinks): SocialLinks {
   return output;
 }
 
-function rankEmails(emails: string[], websiteHost: string): string[] {
+export function rankEmails(emails: string[], websiteHost: string): string[] {
   const host = websiteHost.replace(/^www\./, "");
   const sameDomain: string[] = [];
   const others: string[] = [];

@@ -1,9 +1,15 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useState, useSyncExternalStore } from "react";
 import { useAppState } from "./app-state";
 import { formatPhoneForWa, mapsUrl } from "@/lib/format";
 import { mapLimit } from "@/lib/concurrency";
+import {
+  getProvidersSnapshot,
+  getServerProvidersSnapshot,
+  subscribeProviders,
+  type ProviderConfig,
+} from "@/lib/providers";
 import { exportProspectsToExcel } from "@/lib/export-excel";
 import { downloadProspectReport, previewProspectReport } from "@/lib/export-pdf";
 import { SocialBadges } from "./social-icons";
@@ -104,6 +110,17 @@ function IconEye() {
   );
 }
 
+function IconTrash() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6M14 11v6" />
+    </svg>
+  );
+}
+
 function OpportunityBadge({ opportunity }: { opportunity?: WebOpportunity }) {
   if (!opportunity) return <span className="text-xs text-slate-600">—</span>;
   return (
@@ -142,6 +159,23 @@ interface EnrichResponse {
   message?: string;
 }
 
+interface EmailExtractResult {
+  id: string;
+  emails: string[];
+  bestEmail: string;
+  emailStatus: EmailValidationStatus;
+  emailStatusLabel: string;
+  emailReason: string;
+  source: "apify" | "html" | "none";
+}
+
+interface EmailExtractResponse {
+  ok: boolean;
+  results: EmailExtractResult[];
+  usedApify?: boolean;
+  message?: string;
+}
+
 interface Filters {
   selectedIds: string[];
   busy: Record<string, boolean>;
@@ -172,6 +206,39 @@ async function requestEnrichment(items: Prospect[]): Promise<EnrichResponse> {
   }
 }
 
+async function requestEmailExtraction(
+  items: Prospect[],
+  config: ProviderConfig
+): Promise<EmailExtractResponse> {
+  try {
+    const res = await fetch("/api/enrich-emails", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: items.map((p) => ({ id: p.id, website: p.website })),
+        apifyToken: config.apifyToken,
+        emailActor: config.emailActor,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || data?.success !== true) {
+      return {
+        ok: false,
+        results: [],
+        message: data?.message ?? "No se pudieron extraer correos.",
+      };
+    }
+    return {
+      ok: true,
+      results: Array.isArray(data.results) ? data.results : [],
+      usedApify: data?.usedApify === true,
+      message: typeof data?.message === "string" ? data.message : undefined,
+    };
+  } catch {
+    return { ok: false, results: [], message: "Error de conexión al extraer correos." };
+  }
+}
+
 function buildPatch(current: Prospect, result: EnrichResult): Partial<Prospect> {
   const patch: Partial<Prospect> = {
     emails: result.emails.length ? result.emails : current.emails,
@@ -195,9 +262,23 @@ function buildPatch(current: Prospect, result: EnrichResult): Partial<Prospect> 
 }
 
 export function ResultsTable() {
-  const { prospects, selectedIds, toggleSelect, selectAll, updateProspects } = useAppState();
+  const {
+    prospects,
+    selectedIds,
+    toggleSelect,
+    selectAll,
+    updateProspects,
+    setProspects,
+    clearSelection,
+  } = useAppState();
+  const providerConfig = useSyncExternalStore(
+    subscribeProviders,
+    getProvidersSnapshot,
+    getServerProvidersSnapshot
+  );
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [emailLoading, setEmailLoading] = useState(false);
   const [exporting, setExporting] = useState<Filters["exporting"]>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -277,6 +358,98 @@ export function ResultsTable() {
     }
   }
 
+  const runEmailExtraction = useCallback(
+    async (targets: Prospect[]) => {
+      const list = targets.filter((p) => p.website);
+      if (list.length === 0) {
+        setNotice("Ninguno de los prospectos seleccionados tiene sitio web para escanear.");
+        return;
+      }
+      setNotice(null);
+      const ids = list.map((p) => p.id);
+      setBusy((prev) => {
+        const next = { ...prev };
+        for (const id of ids) next[id] = true;
+        return next;
+      });
+
+      const chunks: Prospect[][] = [];
+      const chunkSize = 8;
+      for (let i = 0; i < list.length; i += chunkSize) {
+        chunks.push(list.slice(i, i + chunkSize));
+      }
+
+      const responses = await mapLimit(chunks, 4, (chunk) =>
+        requestEmailExtraction(chunk, providerConfig)
+      );
+
+      const updates: Record<string, Partial<Prospect>> = {};
+      let foundCount = 0;
+      let failure: string | null = null;
+
+      for (const response of responses) {
+        if (!response.ok) {
+          failure = response.message ?? "No se pudieron extraer correos.";
+          continue;
+        }
+        if (response.message) failure = response.message;
+        for (const result of response.results) {
+          const patch: Partial<Prospect> = {
+            emailStatus: result.emailStatus,
+            emailStatusLabel: result.emailStatusLabel,
+            emailReason: result.emailReason,
+            enriched: true,
+          };
+          if (result.emails.length > 0) patch.emails = result.emails;
+          if (result.bestEmail) {
+            patch.correo = result.bestEmail;
+            foundCount++;
+          }
+          updates[result.id] = patch;
+        }
+      }
+
+      if (Object.keys(updates).length > 0) updateProspects(updates);
+
+      setBusy((prev) => {
+        const next = { ...prev };
+        for (const id of ids) delete next[id];
+        return next;
+      });
+
+      if (foundCount > 0) {
+        setNotice(`Correos extraídos y asignados: ${foundCount} de ${list.length}.`);
+      } else if (failure) {
+        setNotice(failure);
+      } else {
+        setNotice("No se encontraron correos en los sitios web analizados.");
+      }
+    },
+    [providerConfig, updateProspects]
+  );
+
+  async function extractEmails() {
+    const targets =
+      selectedIds.length > 0 ? prospects.filter((p) => selectedSet.has(p.id)) : prospects;
+    setEmailLoading(true);
+    try {
+      await runEmailExtraction(targets);
+    } finally {
+      setEmailLoading(false);
+    }
+  }
+
+  function handleClearResults() {
+    if (prospects.length === 0) return;
+    const confirmed = window.confirm(
+      "¿Vaciar la lista de resultados en pantalla? El historial guardado no se eliminará."
+    );
+    if (!confirmed) return;
+    setProspects([]);
+    clearSelection();
+    setNotice("Lista de resultados vaciada. Puedes iniciar una nueva búsqueda.");
+  }
+
   async function handleExportExcel() {
     if (exportTargets.length === 0 || exporting) return;
     setExporting("excel");
@@ -315,12 +488,15 @@ export function ResultsTable() {
       <ResultsToolbar
         exporting={exporting}
         bulkLoading={bulkLoading}
+        emailLoading={emailLoading}
         hasProspects={prospects.length > 0}
         selectedCount={selectedIds.length}
         onExportExcel={handleExportExcel}
         onPreview={() => void handleReport("preview")}
         onDownload={() => void handleReport("pdf")}
         onEnrichAll={enrichAll}
+        onExtractEmails={extractEmails}
+        onClearResults={handleClearResults}
       />
 
       {notice && <NoticeBar notice={notice} />}
@@ -341,21 +517,27 @@ export function ResultsTable() {
 function ResultsToolbar({
   exporting,
   bulkLoading,
+  emailLoading,
   hasProspects,
   selectedCount,
   onExportExcel,
   onPreview,
   onDownload,
   onEnrichAll,
+  onExtractEmails,
+  onClearResults,
 }: {
   exporting: Filters["exporting"];
   bulkLoading: boolean;
+  emailLoading: boolean;
   hasProspects: boolean;
   selectedCount: number;
   onExportExcel: () => void;
   onPreview: () => void;
   onDownload: () => void;
   onEnrichAll: () => void;
+  onExtractEmails: () => void;
+  onClearResults: () => void;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
@@ -403,6 +585,29 @@ function ResultsToolbar({
           {bulkLoading
             ? "Enriqueciendo…"
             : `Enriquecer Contactos${selectedCount > 0 ? ` (${selectedCount})` : ""}`}
+        </button>
+        <button
+          type="button"
+          onClick={onExtractEmails}
+          disabled={emailLoading || !hasProspects}
+          title="Escanea las URLs de la columna Sitio Web con Apify (o el extractor HTML local) para extraer y completar correos"
+          className="rounded-lg border border-amber-600/50 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/20 disabled:opacity-50"
+        >
+          {emailLoading
+            ? "Extrayendo correos…"
+            : `Enriquecer / Extraer Correos de Sitios Web${
+                selectedCount > 0 ? ` (${selectedCount})` : ""
+              }`}
+        </button>
+        <button
+          type="button"
+          onClick={onClearResults}
+          disabled={!hasProspects}
+          title="Vaciar la lista de resultados en pantalla sin borrar el historial guardado"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600/60 bg-slate-700/20 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-700/50 hover:text-slate-100 disabled:opacity-50"
+        >
+          <IconTrash />
+          Limpiar Resultados
         </button>
       </div>
     </div>
