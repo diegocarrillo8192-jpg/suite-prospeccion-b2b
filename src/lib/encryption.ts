@@ -1,4 +1,4 @@
-const STORAGE_KEY = "b2b.smtp.credentials";
+const STORAGE_KEY = "b2b.smtp.vault";
 const SALT_TEXT = "suite-prospeccion-b2b::v1";
 
 export interface SmtpCredentials {

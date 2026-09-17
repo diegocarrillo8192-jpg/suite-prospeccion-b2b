@@ -198,12 +198,15 @@ function findEmails(html: string): string[] {
     .replace(/&amp;/gi, "&");
   const re = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi;
   const found: string[] = [];
+  const seen = new Set<string>();
   for (const m of decoded.match(re) ?? []) {
     const e = m.toLowerCase();
     if (IMAGE_EXT.test(e)) continue;
     if (BAD_EMAIL_HINTS.test(e)) continue;
     if (e.length > 120) continue;
-    if (!found.includes(e)) found.push(e);
+    if (seen.has(e)) continue;
+    seen.add(e);
+    found.push(e);
   }
   return found;
 }
@@ -365,22 +368,28 @@ function dedupResults(list: SearchResult[]): SearchResult[] {
   return out;
 }
 
-async function mapConcurrency<T, R>(
+function mapConcurrency<T, R>(
   items: T[],
   limit: number,
   fn: (item: T) => Promise<R>
 ): Promise<R[]> {
   const results = new Array<R>(items.length);
-  let idx = 0;
-  async function worker() {
-    while (idx < items.length) {
-      const i = idx++;
-      results[i] = await fn(items[i]);
-    }
-  }
-  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker);
-  await Promise.all(workers);
-  return results;
+  let next = 0;
+
+  const runNext = (): Promise<void> => {
+    if (next >= items.length) return Promise.resolve();
+    const i = next++;
+    return Promise.resolve()
+      .then(() => fn(items[i]))
+      .then((result) => {
+        results[i] = result;
+        return runNext();
+      });
+  };
+
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  const workers = Array.from({ length: workerCount }, runNext);
+  return Promise.all(workers).then(() => results);
 }
 
 function toInternationalPhone(rawDigits: string, countryCode: string): string {
