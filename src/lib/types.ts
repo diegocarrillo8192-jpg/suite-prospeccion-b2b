@@ -1,3 +1,5 @@
+import type { DetectedTech, WebOpportunity } from "./tech-detector";
+
 export type SocialPlatform =
   | "instagram"
   | "linkedin"
@@ -38,6 +40,10 @@ export interface Prospect {
   emailStatusLabel?: string;
   emailReason?: string;
   enriched?: boolean;
+  techStack?: DetectedTech[];
+  techSsl?: boolean;
+  techServer?: string | null;
+  webOpportunity?: WebOpportunity;
 }
 
 export type TabId = "search" | "sender";

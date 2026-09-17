@@ -105,6 +105,10 @@ export async function POST(request: NextRequest) {
         hasMx: detail.validation?.hasMx ?? false,
         disposable: detail.validation?.disposable ?? false,
         enriched: detail.enriched,
+        techStack: detail.tech.detected,
+        techSsl: detail.tech.ssl,
+        techServer: detail.tech.server,
+        webOpportunity: detail.tech.analyzed ? detail.tech.opportunity : null,
       };
     })
   );

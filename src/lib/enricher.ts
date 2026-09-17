@@ -1,6 +1,7 @@
 import type { EmailValidation, SocialLinks } from "./types";
 import { pickBestEmail, validateEmail } from "./email-validator";
 import { formatPhone, normalizeWebsite } from "./engines/shared";
+import { detectTechStack, emptyTechStack, type TechStack } from "./tech-detector";
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -34,6 +35,7 @@ export interface SiteScan {
   phones: string[];
   social: SocialLinks;
   pagesScanned: number;
+  tech: TechStack;
 }
 
 export interface EnrichmentResult {
@@ -45,6 +47,7 @@ export interface EnrichmentResult {
   validation: EmailValidation | null;
   pagesScanned: number;
   enriched: boolean;
+  tech: TechStack;
 }
 
 function decodeEntities(input: string): string {
@@ -193,7 +196,14 @@ function discoverContactLinks(html: string, baseUrl: string): string[] {
   return links;
 }
 
-async function fetchPage(url: string, timeoutMs: number): Promise<string> {
+interface FetchedPage {
+  html: string;
+  headers: Record<string, string>;
+  url: string;
+  ssl: boolean;
+}
+
+async function fetchPage(url: string, timeoutMs: number): Promise<FetchedPage | null> {
   try {
     const res = await fetch(url, {
       headers: {
@@ -204,13 +214,19 @@ async function fetchPage(url: string, timeoutMs: number): Promise<string> {
       redirect: "follow",
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (!res.ok) return "";
+    if (!res.ok) return null;
     const contentType = res.headers.get("content-type") ?? "";
-    if (contentType && !contentType.includes("html") && !contentType.includes("text")) return "";
+    if (contentType && !contentType.includes("html") && !contentType.includes("text")) return null;
     const buffer = await res.arrayBuffer();
-    return new TextDecoder("utf-8").decode(buffer).slice(0, 800_000);
+    const html = new TextDecoder("utf-8").decode(buffer).slice(0, 800_000);
+    const headers: Record<string, string> = {};
+    res.headers.forEach((value, key) => {
+      headers[key.toLowerCase()] = value;
+    });
+    const finalUrl = res.url || url;
+    return { html, headers, url: finalUrl, ssl: finalUrl.startsWith("https://") };
   } catch {
-    return "";
+    return null;
   }
 }
 
@@ -237,7 +253,7 @@ export async function scanWebsite(
   options?: { maxPages?: number; timeoutMs?: number; concurrency?: number }
 ): Promise<SiteScan> {
   const base = normalizeWebsite(website);
-  if (!base) return { emails: [], phones: [], social: {}, pagesScanned: 0 };
+  if (!base) return { emails: [], phones: [], social: {}, pagesScanned: 0, tech: emptyTechStack() };
 
   const maxPages = Math.max(1, options?.maxPages ?? 4);
   const timeoutMs = options?.timeoutMs ?? 6000;
@@ -246,14 +262,16 @@ export async function scanWebsite(
   const emails = new Set<string>();
   const phones = new Set<string>();
   const social: SocialLinks = {};
+  const htmlChunks: string[] = [];
   let pagesScanned = 0;
 
   const homepage = await fetchPage(base, timeoutMs);
   if (homepage) {
     pagesScanned++;
-    findEmails(homepage).forEach((email) => emails.add(email));
-    findPhones(homepage).forEach((phone) => phones.add(phone));
-    Object.assign(social, stripEmpty(findSocialLinks(homepage)));
+    htmlChunks.push(homepage.html);
+    findEmails(homepage.html).forEach((email) => emails.add(email));
+    findPhones(homepage.html).forEach((phone) => phones.add(phone));
+    Object.assign(social, stripEmpty(findSocialLinks(homepage.html)));
   }
 
   let origin = "";
@@ -272,7 +290,7 @@ export async function scanWebsite(
     targets.push(clean);
   };
 
-  if (homepage && origin) discoverContactLinks(homepage, base).forEach(pushTarget);
+  if (homepage && origin) discoverContactLinks(homepage.html, base).forEach(pushTarget);
   if (origin) {
     for (const path of CONTACT_PATHS) {
       try {
@@ -285,22 +303,32 @@ export async function scanWebsite(
 
   const limited = targets.slice(0, Math.max(0, maxPages - (homepage ? 1 : 0)));
   const pages = await mapLimit(limited, concurrency, async (url) => ({
-    html: await fetchPage(url, timeoutMs),
+    page: await fetchPage(url, timeoutMs),
   }));
 
-  for (const page of pages) {
-    if (!page.html) continue;
+  for (const { page } of pages) {
+    if (!page) continue;
     pagesScanned++;
+    htmlChunks.push(page.html);
     findEmails(page.html).forEach((email) => emails.add(email));
     findPhones(page.html).forEach((phone) => phones.add(phone));
     Object.assign(social, stripEmpty(findSocialLinks(page.html)));
   }
+
+  const tech = homepage
+    ? detectTechStack({
+        html: htmlChunks.join("\n"),
+        headers: homepage.headers,
+        url: homepage.url,
+      })
+    : emptyTechStack();
 
   return {
     emails: Array.from(emails),
     phones: Array.from(phones),
     social,
     pagesScanned,
+    tech,
   };
 }
 
@@ -349,7 +377,7 @@ export async function enrichProspect(
 
   const scan = website
     ? await scanWebsite(website, options)
-    : { emails: [], phones: [], social: {}, pagesScanned: 0 };
+    : { emails: [], phones: [], social: {}, pagesScanned: 0, tech: emptyTechStack() };
 
   const host = website ? hostOf(normalizeWebsite(website)) : "";
   const allEmails = Array.from(new Set([...scan.emails, existingEmail].filter(Boolean)));
@@ -375,5 +403,6 @@ export async function enrichProspect(
     validation,
     pagesScanned: scan.pagesScanned,
     enriched: scan.pagesScanned > 0,
+    tech: scan.tech,
   };
 }

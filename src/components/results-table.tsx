@@ -5,6 +5,12 @@ import { useAppState } from "./app-state";
 import { formatPhoneForWa, mapsUrl } from "@/lib/format";
 import { SocialBadges } from "./social-icons";
 import type { EmailValidationStatus, Prospect } from "@/lib/types";
+import type {
+  DetectedTech,
+  OpportunityLevel,
+  TechCategory,
+  WebOpportunity,
+} from "@/lib/tech-detector";
 
 const STATUS_STYLES: Record<EmailValidationStatus, string> = {
   valid: "border-emerald-500/40 bg-emerald-500/15 text-emerald-300",
@@ -20,6 +26,64 @@ const STATUS_DOT: Record<EmailValidationStatus, string> = {
   unknown: "bg-slate-500",
 };
 
+const CATEGORY_STYLES: Record<TechCategory, string> = {
+  cms: "border-violet-500/40 bg-violet-500/10 text-violet-300",
+  analytics: "border-sky-500/40 bg-sky-500/10 text-sky-300",
+  ecommerce: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
+  infrastructure: "border-slate-600/50 bg-slate-700/30 text-slate-300",
+};
+
+const CATEGORY_LABELS: Record<TechCategory, string> = {
+  cms: "CMS / Framework",
+  analytics: "Analítica / Marketing",
+  ecommerce: "E-commerce / Pagos",
+  infrastructure: "Infraestructura / Seguridad",
+};
+
+const OPPORTUNITY_STYLES: Record<OpportunityLevel, string> = {
+  alta: "border-amber-500/50 bg-amber-500/15 text-amber-300",
+  media: "border-sky-500/40 bg-sky-500/15 text-sky-300",
+  baja: "border-slate-600/50 bg-slate-700/30 text-slate-400",
+};
+
+function TechBadges({ tech, ssl }: { tech?: DetectedTech[]; ssl?: boolean }) {
+  const items = tech ?? [];
+  if (items.length === 0 && ssl !== false) {
+    return <span className="text-xs text-slate-600">—</span>;
+  }
+  return (
+    <div className="flex max-w-[320px] flex-wrap items-center gap-1">
+      {ssl === false && (
+        <span className="rounded-full border border-rose-500/40 bg-rose-500/15 px-2 py-0.5 text-[10px] font-semibold text-rose-300">
+          Sin SSL
+        </span>
+      )}
+      {items.map((item) => (
+        <span
+          key={item.id}
+          title={CATEGORY_LABELS[item.category]}
+          className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${CATEGORY_STYLES[item.category]}`}
+        >
+          {item.name}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function OpportunityBadge({ opportunity }: { opportunity?: WebOpportunity }) {
+  if (!opportunity) return <span className="text-xs text-slate-600">—</span>;
+  return (
+    <span
+      title={opportunity.reasons.length ? opportunity.reasons.join("\n") : "Sin observaciones"}
+      className={`inline-flex flex-col items-start gap-0.5 rounded-lg border px-2 py-1 text-[11px] font-semibold ${OPPORTUNITY_STYLES[opportunity.level]}`}
+    >
+      <span>{opportunity.label}</span>
+      <span className="text-[10px] font-normal opacity-80">{opportunity.score}/100</span>
+    </span>
+  );
+}
+
 interface EnrichResult {
   id: string;
   emails: string[];
@@ -33,6 +97,10 @@ interface EnrichResult {
   hasMx: boolean;
   disposable: boolean;
   enriched: boolean;
+  techStack?: DetectedTech[];
+  techSsl?: boolean;
+  techServer?: string | null;
+  webOpportunity?: WebOpportunity | null;
 }
 
 async function requestEnrichment(
@@ -76,6 +144,10 @@ function buildPatch(current: Prospect, result: EnrichResult): Partial<Prospect> 
     patch.whatsapp = result.phoneDigits;
     patch.telefono = result.phoneDisplay || current.telefono;
   }
+  if (result.techStack) patch.techStack = result.techStack;
+  if (typeof result.techSsl === "boolean") patch.techSsl = result.techSsl;
+  if (result.techServer !== undefined) patch.techServer = result.techServer;
+  if (result.webOpportunity) patch.webOpportunity = result.webOpportunity;
   return patch;
 }
 
@@ -156,7 +228,8 @@ export function ResultsTable() {
     <div className="overflow-hidden rounded-2xl border border-slate-800 bg-[#0f172a]">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
         <p className="text-xs text-slate-500">
-          Enriquecimiento profundo con validación MX/DNS y redes sociales.
+          Enriquecimiento profundo con validación MX/DNS, redes sociales, detector de stack web y
+          oportunidad para agencia.
         </p>
         <button
           type="button"
@@ -177,7 +250,7 @@ export function ResultsTable() {
       )}
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[1180px] border-collapse text-left text-sm">
+        <table className="w-full min-w-[1560px] border-collapse text-left text-sm">
           <thead>
             <tr className="border-b border-slate-800 text-xs uppercase tracking-wide text-slate-500">
               <th className="w-10 px-4 py-3">
@@ -196,6 +269,8 @@ export function ResultsTable() {
               <th className="px-3 py-3 font-medium">WhatsApp</th>
               <th className="px-3 py-3 font-medium">Dirección</th>
               <th className="px-3 py-3 font-medium">Sitio Web</th>
+              <th className="px-3 py-3 font-medium">Tecnologías</th>
+              <th className="px-3 py-3 font-medium">Oportunidad Web</th>
               <th className="px-3 py-3 font-medium">Acciones</th>
             </tr>
           </thead>
@@ -277,6 +352,12 @@ export function ResultsTable() {
                     ) : (
                       <span className="text-xs text-slate-600">No disponible</span>
                     )}
+                  </td>
+                  <td className="px-3 py-3">
+                    <TechBadges tech={p.techStack} ssl={p.techSsl} />
+                  </td>
+                  <td className="px-3 py-3">
+                    <OpportunityBadge opportunity={p.webOpportunity} />
                   </td>
                   <td className="px-3 py-3">
                     <button
