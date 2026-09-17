@@ -162,23 +162,36 @@ function buildOverpassQuery(filters: string[], radius: number, geo: GeoLocation,
   ].join("\n");
 }
 
-async function runOverpassQuery(query: string): Promise<OverpassElement[]> {
+async function runOverpassQuery(query: string, signal?: AbortSignal): Promise<OverpassElement[]> {
   for (const endpoint of OVERPASS_ENDPOINTS) {
     try {
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Accept: "application/json",
-          "User-Agent": USER_AGENT,
-        },
-        body: new URLSearchParams({ data: query }).toString(),
-        signal: AbortSignal.timeout(25000),
-      });
-      if (!res.ok) continue;
-      const data = (await res.json().catch(() => null)) as OverpassResponse | null;
-      const elements = data?.elements;
-      if (Array.isArray(elements) && elements.length > 0) return elements;
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      if (signal?.aborted) {
+        controller.abort();
+      } else {
+        signal?.addEventListener("abort", abort, { once: true });
+      }
+      const timer = setTimeout(() => controller.abort(), 25000);
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Accept: "application/json",
+            "User-Agent": USER_AGENT,
+          },
+          body: new URLSearchParams({ data: query }).toString(),
+          signal: controller.signal,
+        });
+        if (!res.ok) continue;
+        const data = (await res.json().catch(() => null)) as OverpassResponse | null;
+        const elements = data?.elements;
+        if (Array.isArray(elements) && elements.length > 0) return elements;
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", abort);
+      }
     } catch {
       continue;
     }
@@ -291,7 +304,8 @@ function toProspects(
 export async function extractOverpass(
   geo: GeoLocation,
   niche: string,
-  limit: number
+  limit: number,
+  signal?: AbortSignal
 ): Promise<Prospect[]> {
   if (!geo.latitude || !geo.longitude) return [];
 
@@ -310,9 +324,9 @@ export async function extractOverpass(
     }
   };
 
-  collect(await runOverpassRadius(filters, 12000, geo, topic, outCount, limit));
+  collect(await runOverpassRadius(filters, 12000, geo, topic, outCount, limit, signal));
   if (collected.length < limit) {
-    collect(await runOverpassRadius(filters, 6000, geo, topic, outCount, limit));
+    collect(await runOverpassRadius(filters, 6000, geo, topic, outCount, limit, signal));
   }
 
   return collected.slice(0, limit);
@@ -324,10 +338,11 @@ async function runOverpassRadius(
   geo: GeoLocation,
   topic: string,
   outCount: number,
-  limit: number
+  limit: number,
+  signal?: AbortSignal
 ): Promise<Prospect[]> {
   const query = buildOverpassQuery(filters, radius, geo, outCount);
-  const elements = await runOverpassQuery(query);
+  const elements = await runOverpassQuery(query, signal);
   if (elements.length === 0) return [];
   return toProspects(elements, geo, topic, limit);
 }

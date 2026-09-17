@@ -11,6 +11,29 @@ const USER_AGENT = "SuiteProspeccionB2B/1.0 (contacto: diegocarrillo8192@gmail.c
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
+const PROVIDER_TIMEOUT_MS = 8000;
+
+function withDeadline(
+  external: AbortSignal | undefined,
+  timeoutMs: number
+): { signal: AbortSignal; cleanup: () => void } {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (external?.aborted) {
+    controller.abort();
+  } else {
+    external?.addEventListener("abort", abort, { once: true });
+  }
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timer);
+      external?.removeEventListener("abort", abort);
+    },
+  };
+}
+
 export interface ExtractionMeta {
   source: string;
   countryCode: string;
@@ -176,10 +199,19 @@ function decodeSearchUrl(href: string): string {
   return h;
 }
 
-async function fetchJson(url: string, headers: Record<string, string>): Promise<unknown> {
-  const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+async function fetchJson(
+  url: string,
+  headers: Record<string, string>,
+  external?: AbortSignal
+): Promise<unknown> {
+  const { signal, cleanup } = withDeadline(external, 15000);
+  try {
+    const res = await fetch(url, { headers, signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    cleanup();
+  }
 }
 
 export async function geocodeCity(city: string): Promise<GeoLocation | null> {
@@ -203,7 +235,8 @@ export async function geocodeCity(city: string): Promise<GeoLocation | null> {
   }
 }
 
-async function fetchHtml(url: string, browser: boolean): Promise<string> {
+async function fetchHtml(url: string, browser: boolean, external?: AbortSignal): Promise<string> {
+  const { signal, cleanup } = withDeadline(external, browser ? 10000 : 5000);
   try {
     const res = await fetch(url, {
       headers: {
@@ -212,12 +245,14 @@ async function fetchHtml(url: string, browser: boolean): Promise<string> {
         "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
       },
       redirect: "follow",
-      signal: AbortSignal.timeout(browser ? 10000 : 5000),
+      signal,
     });
     if (!res.ok) return "";
     return await res.text();
   } catch {
     return "";
+  } finally {
+    cleanup();
   }
 }
 
@@ -256,15 +291,20 @@ function parseDuckDuckGo(html: string): SearchResult[] {
   return results;
 }
 
-async function searchBing(query: string, count: number, first: number): Promise<SearchResult[]> {
+async function searchBing(
+  query: string,
+  count: number,
+  first: number,
+  signal?: AbortSignal
+): Promise<SearchResult[]> {
   const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&count=${count}&first=${first}&setlang=es&mkt=es-ES`;
-  const html = await fetchHtml(url, true);
+  const html = await fetchHtml(url, true, signal);
   return parseBing(html);
 }
 
-async function searchDuckDuckGo(query: string): Promise<SearchResult[]> {
+async function searchDuckDuckGo(query: string, signal?: AbortSignal): Promise<SearchResult[]> {
   const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-  const html = await fetchHtml(url, true);
+  const html = await fetchHtml(url, true, signal);
   return parseDuckDuckGo(html);
 }
 
@@ -423,12 +463,28 @@ export async function extractProspects(
   const plan = planQueries(topic, cityName, countryName);
   const query = plan.query;
 
-  const [bingPage1, ddgResults, overpassProspects, mapsProspects] = await Promise.all([
-    searchBing(query, Math.min(limit, 50), 1),
-    searchDuckDuckGo(query),
-    geo ? extractOverpass(geo, topic, limit) : Promise.resolve([] as Prospect[]),
-    geo ? extractGoogleMapsPublic(geo, topic, limit) : Promise.resolve([] as Prospect[]),
+  const providerController = new AbortController();
+  const providerTimer = setTimeout(() => providerController.abort(), PROVIDER_TIMEOUT_MS);
+  const providerSignal = providerController.signal;
+
+  const settled = await Promise.allSettled([
+    searchBing(query, Math.min(limit, 50), 1, providerSignal),
+    searchDuckDuckGo(query, providerSignal),
+    geo ? extractOverpass(geo, topic, limit, providerSignal) : Promise.resolve([] as Prospect[]),
+    geo
+      ? extractGoogleMapsPublic(geo, topic, limit, providerSignal)
+      : Promise.resolve([] as Prospect[]),
   ]);
+
+  clearTimeout(providerTimer);
+
+  const valueOf = <T,>(result: PromiseSettledResult<T>, fallback: T): T =>
+    result.status === "fulfilled" ? result.value : fallback;
+
+  const bingPage1 = valueOf(settled[0], [] as SearchResult[]);
+  const ddgResults = valueOf(settled[1], [] as SearchResult[]);
+  const overpassProspects = valueOf(settled[2], [] as Prospect[]);
+  const mapsProspects = valueOf(settled[3], [] as Prospect[]);
 
   const bingResults: SearchResult[] = [...bingPage1];
   if (limit > 50 && bingPage1.length) {

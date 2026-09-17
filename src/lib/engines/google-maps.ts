@@ -21,7 +21,15 @@ interface MapsPlace {
   address: string;
 }
 
-async function fetchHtml(url: string): Promise<string> {
+async function fetchHtml(url: string, signal?: AbortSignal): Promise<string> {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (signal?.aborted) {
+    controller.abort();
+  } else {
+    signal?.addEventListener("abort", abort, { once: true });
+  }
+  const timer = setTimeout(() => controller.abort(), 12000);
   try {
     const res = await fetch(url, {
       headers: {
@@ -30,12 +38,15 @@ async function fetchHtml(url: string): Promise<string> {
         "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
       },
       redirect: "follow",
-      signal: AbortSignal.timeout(12000),
+      signal: controller.signal,
     });
     if (!res.ok) return "";
     return await res.text();
   } catch {
     return "";
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
   }
 }
 
@@ -204,11 +215,12 @@ function findPlaceArrays(
 export async function extractGoogleMapsPublic(
   geo: GeoLocation,
   niche: string,
-  limit: number
+  limit: number,
+  signal?: AbortSignal
 ): Promise<Prospect[]> {
   const plan = planQueries(niche.trim() || "negocios", geo.cityName, geo.countryName);
   const url = `https://www.google.com/maps/search/${encodeURIComponent(plan.phrase)}?hl=es`;
-  const html = await fetchHtml(url);
+  const html = await fetchHtml(url, signal);
   if (!html) return [];
 
   const state = extractInitializationState(html);

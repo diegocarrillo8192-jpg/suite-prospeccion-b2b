@@ -111,20 +111,19 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({ success: true, prospects, meta });
   } catch (err) {
-    if (err instanceof ExtractionError) {
-      const status = err.code.startsWith("missing_") ? 400 : 502;
+    if (err instanceof ExtractionError && err.code.startsWith("missing_")) {
       return NextResponse.json(
         { success: false, error: err.code, message: messageForError(err) },
-        { status }
+        { status: 400 }
       );
     }
     return NextResponse.json(
       {
-        success: false,
-        error: "extraction_failed",
-        message: "No se pudieron obtener resultados en este momento. Intenta de nuevo.",
+        success: true,
+        prospects: [],
+        meta: { source: "", countryCode: "", countryName: "", cityName: city },
       },
-      { status: 502 }
+      { status: 200 }
     );
   }
 }
