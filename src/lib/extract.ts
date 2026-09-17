@@ -1,9 +1,10 @@
 import type { EmailValidation, Prospect, SocialLinks } from "./types";
 import { callingCodeFor, countryNameFor } from "./country-codes";
 import { enrichProspect } from "./enricher";
-import { isAllowedWebsite } from "./engines/domains";
+import { isAllowedWebsite, isForeignTld } from "./engines/domains";
 import { extractOverpass } from "./engines/overpass";
 import { extractGoogleMapsPublic } from "./engines/google-maps";
+import { planQueries } from "./engines/query";
 
 const NOMINATIM_BASE = "https://nominatim.openstreetmap.org";
 const USER_AGENT = "SuiteProspeccionB2B/1.0 (contacto: diegocarrillo8192@gmail.com)";
@@ -330,13 +331,6 @@ function displayPhone(digits: string, countryCode: string): string {
   return cc ? `+${cc} ${national}`.trim() : `+${digits}`;
 }
 
-function buildQuery(niche: string, city: string): string {
-  const n = niche.trim();
-  const c = city.trim();
-  if (n && c) return `${n} en ${c}`;
-  return c || n;
-}
-
 function dedupeProspects(list: Prospect[]): Prospect[] {
   const seenHost = new Set<string>();
   const seenName = new Set<string>();
@@ -353,6 +347,69 @@ function dedupeProspects(list: Prospect[]): Prospect[] {
   return out;
 }
 
+async function enrichSearchResults(
+  results: SearchResult[],
+  countryCode: string,
+  cityName: string,
+  countryName: string,
+  topic: string,
+  offset: number,
+  maxPages: number
+): Promise<Prospect[]> {
+  const enriched = await mapConcurrency(results, 6, async (r) => {
+    const detail = await enrichProspect({ website: r.url, countryCode }, { maxPages });
+    const raw: RawBusiness = {
+      name: r.title,
+      website: r.url,
+      snippet: r.snippet,
+      city: cityName,
+      countryCode,
+      email: detail.bestEmail,
+      phone: detail.phoneDigits,
+      emails: detail.emails,
+      social: detail.social,
+      validation: detail.validation,
+    };
+    return raw;
+  });
+
+  return enriched.map((b, i) => {
+    const intl = toInternationalPhone(b.phone, countryCode);
+    const direction = b.snippet || [cityName, countryName].filter(Boolean).join(", ");
+    const whatsappDigits = b.social.whatsapp ? b.social.whatsapp.replace(/\D/g, "") : "";
+    return {
+      id: `p-${hashString(`${b.name}|${b.website}|${offset + i}`)}`,
+      nombre: "",
+      empresa: b.name,
+      correo: b.email || "No disponible",
+      telefono: intl ? displayPhone(intl, countryCode) : "No disponible",
+      whatsapp: whatsappDigits ? toInternationalPhone(whatsappDigits, countryCode) : intl,
+      direccion: direction,
+      website: b.website,
+      ciudad: cityName,
+      rubro: topic,
+      emails: b.emails.length ? b.emails : undefined,
+      social: Object.keys(b.social).length ? b.social : undefined,
+      emailStatus: b.validation?.status ?? "unknown",
+      emailStatusLabel: b.validation?.label ?? "Sin verificar",
+      emailReason: b.validation?.reason ?? "",
+      enriched: b.emails.length > 0 || Boolean(b.validation),
+    } satisfies Prospect;
+  });
+}
+
+function hostKey(url: string): string {
+  return safeHost(url).replace(/^www\./, "");
+}
+
+function buildFallbackVariants(topic: string, city: string, plan: { variants: string[] }): string[] {
+  if (plan.variants.length) return plan.variants;
+  const c = city.trim();
+  const t = topic.trim();
+  if (!c) return [t];
+  return [`${t} ${c}`, `${c} ${t}`, `directorio de ${t} en ${c}`];
+}
+
 export async function extractProspects(
   niche: string,
   city: string,
@@ -360,9 +417,11 @@ export async function extractProspects(
 ): Promise<{ prospects: Prospect[]; meta: ExtractionMeta }> {
   const geo = await geocodeCity(city);
   const countryCode = geo?.countryCode ?? "";
+  const countryName = geo?.countryName ?? "";
   const cityName = geo?.cityName ?? city;
   const topic = niche.trim() || "negocios";
-  const query = buildQuery(topic, city);
+  const plan = planQueries(topic, cityName, countryName);
+  const query = plan.query;
 
   const [bingPage1, ddgResults, overpassProspects, mapsProspects] = await Promise.all([
     searchBing(query, Math.min(limit, 50), 1),
@@ -377,7 +436,9 @@ export async function extractProspects(
     bingResults.push(...bingPage2);
   }
 
-  const webResults = dedupResults(interleave(bingResults, ddgResults));
+  const webResults = dedupResults(interleave(bingResults, ddgResults)).filter(
+    (r) => !isForeignTld(safeHost(r.url), countryCode)
+  );
   const direct = dedupeProspects([...overpassProspects, ...mapsProspects]).slice(0, limit);
   const remaining = Math.max(0, limit - direct.length);
 
@@ -385,64 +446,75 @@ export async function extractProspects(
   if (remaining > 0 && webResults.length) {
     const maxPages = limit > 50 ? 2 : 4;
     const targets = webResults.slice(0, remaining);
-
-    const enriched = await mapConcurrency(targets, 6, async (r) => {
-      const detail = await enrichProspect({ website: r.url, countryCode }, { maxPages });
-      const raw: RawBusiness = {
-        name: r.title,
-        website: r.url,
-        snippet: r.snippet,
-        city: cityName,
-        countryCode,
-        email: detail.bestEmail,
-        phone: detail.phoneDigits,
-        emails: detail.emails,
-        social: detail.social,
-        validation: detail.validation,
-      };
-      return raw;
-    });
-
-    webProspects = enriched.map((b, i) => {
-      const intl = toInternationalPhone(b.phone, countryCode);
-      const direction = b.snippet || [cityName, geo?.countryName].filter(Boolean).join(", ");
-      return {
-        id: `p-${hashString(`${b.name}|${b.website}|${i}`)}`,
-        nombre: "",
-        empresa: b.name,
-        correo: b.email || "No disponible",
-        telefono: intl ? displayPhone(intl, countryCode) : "No disponible",
-        whatsapp: intl,
-        direccion: direction,
-        website: b.website,
-        ciudad: cityName,
-        rubro: topic,
-        emails: b.emails.length ? b.emails : undefined,
-        social: Object.keys(b.social).length ? b.social : undefined,
-        emailStatus: b.validation?.status ?? "unknown",
-        emailStatusLabel: b.validation?.label ?? "Sin verificar",
-        emailReason: b.validation?.reason ?? "",
-        enriched: b.emails.length > 0 || Boolean(b.validation),
-      } satisfies Prospect;
-    });
+    webProspects = await enrichSearchResults(
+      targets,
+      countryCode,
+      cityName,
+      countryName,
+      topic,
+      0,
+      maxPages
+    );
   }
 
-  const prospects = dedupeProspects([...direct, ...webProspects])
-    .filter((prospect) => !prospect.website || isAllowedWebsite(prospect.website))
+  const usedHosts = new Set<string>();
+  const trackHost = (url: string) => {
+    const key = hostKey(url);
+    if (key) usedHosts.add(key);
+  };
+  direct.forEach((p) => trackHost(p.website));
+  webResults.forEach((r) => trackHost(r.url));
+
+  let prospects = dedupeProspects([...direct, ...webProspects])
+    .filter(
+      (p) =>
+        !p.website ||
+        (isAllowedWebsite(p.website) && !isForeignTld(safeHost(p.website), countryCode))
+    )
     .slice(0, limit);
+
+  let secondPassUsed = false;
+  if (prospects.length < limit) {
+    const variants = buildFallbackVariants(topic, cityName, plan);
+    for (const variant of variants.slice(0, 4)) {
+      if (prospects.length >= limit) break;
+      const [bingV, ddgV] = await Promise.all([
+        searchBing(variant, 20, 1),
+        searchDuckDuckGo(variant),
+      ]);
+      const results = dedupResults(interleave(bingV, ddgV)).filter(
+        (r) => !isForeignTld(safeHost(r.url), countryCode) && !usedHosts.has(hostKey(r.url))
+      );
+      if (!results.length) continue;
+      const needed = limit - prospects.length;
+      const extra = await enrichSearchResults(
+        results.slice(0, needed),
+        countryCode,
+        cityName,
+        countryName,
+        topic,
+        prospects.length,
+        2
+      );
+      results.forEach((r) => trackHost(r.url));
+      if (!extra.length) continue;
+      prospects = dedupeProspects([...prospects, ...extra]).slice(0, limit);
+      secondPassUsed = true;
+    }
+  }
 
   const sources: string[] = [];
   if (overpassProspects.length) sources.push("OpenStreetMap (Overpass)");
   if (mapsProspects.length) sources.push("Google Maps");
-  if (bingResults.length) sources.push("Bing");
-  if (ddgResults.length) sources.push("DuckDuckGo");
+  if (bingResults.length || secondPassUsed) sources.push("Bing");
+  if (ddgResults.length || secondPassUsed) sources.push("DuckDuckGo");
 
   return {
     prospects,
     meta: {
       source: sources.join(" + ") || "Web",
       countryCode,
-      countryName: countryNameFor(countryCode, geo?.countryName ?? ""),
+      countryName: countryNameFor(countryCode, countryName),
       cityName,
     },
   };

@@ -1,6 +1,7 @@
 import type { Prospect } from "../types";
 import type { GeoLocation } from "../extract";
-import { buildQuery, formatPhone, makeId, normalizeWebsite } from "./shared";
+import { formatPhone, makeId, normalizeWebsite } from "./shared";
+import { planQueries } from "./query";
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -10,6 +11,8 @@ const HEX_ID = /^0x[0-9a-f]+:0x[0-9a-f]+$/i;
 const URL_RE = /^https?:\/\//i;
 const PHONE_RE = /^\+?[\d][\d\s().-]{6,}$/;
 const NOISE_HOST = /google\.com|gstatic\.com|googleusercontent\.com|goo\.gl|ggpht\.com|schema\.org/i;
+const STREET_HINT =
+  /(av\.?|avenida|calle|v[ií]a|street|ave|blvd|boulevard|edificio|local|planta|piso|corregimiento|barriada|urbanización|urbanizacion|ph\b|torre)\b/i;
 
 interface MapsPlace {
   name: string;
@@ -124,7 +127,9 @@ function parsePlace(strings: string[], cityName: string): MapsPlace | null {
         value.length > 8 &&
         value.length < 200 &&
         /\d/.test(value) &&
-        (value.includes(",") || value.toLowerCase().includes(cityName.toLowerCase()))
+        (value.includes(",") ||
+          value.toLowerCase().includes(cityName.toLowerCase()) ||
+          STREET_HINT.test(value))
     ) ?? "";
 
   if (!phone && !website) return null;
@@ -201,8 +206,8 @@ export async function extractGoogleMapsPublic(
   niche: string,
   limit: number
 ): Promise<Prospect[]> {
-  const query = buildQuery(niche.trim() || "negocios", geo.cityName);
-  const url = `https://www.google.com/maps/search/${encodeURIComponent(query)}?hl=es`;
+  const plan = planQueries(niche.trim() || "negocios", geo.cityName, geo.countryName);
+  const url = `https://www.google.com/maps/search/${encodeURIComponent(plan.phrase)}?hl=es`;
   const html = await fetchHtml(url);
   if (!html) return [];
 

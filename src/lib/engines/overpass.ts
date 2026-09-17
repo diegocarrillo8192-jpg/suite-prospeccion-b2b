@@ -21,113 +21,120 @@ interface OverpassResponse {
 
 interface NicheRule {
   test: RegExp;
-  filter: string;
+  filters: string[];
 }
 
 const NICHE_RULES: NicheRule[] = [
   {
     test: /restauran|gastronom|comida|marisqu|pizzer|pizza|sushi|parrilla|asador|cafeter|caf[eé]|bar\b|cervez|cantina|pupus|fonda|panader|pasteler|helader|dulcer|comida r[aá]pida/i,
-    filter: '["amenity"~"^(restaurant|cafe|fast_food|bar|pub|biergarten|ice_cream|food_court)$"]',
+    filters: ['["amenity"~"^(restaurant|cafe|fast_food|bar|pub|biergarten|ice_cream|food_court)$"]'],
   },
   {
     test: /taller|mec[aá]nic|automotriz|autos?\b|carro|veh[ií]cul|llanta|repues|carrocer/i,
-    filter: '["shop"~"^(car_repair|car_parts|tyres|motorcycle_repair)$"]',
+    filters: ['["shop"~"^(car_repair|car_parts|tyres|motorcycle_repair)$"]'],
   },
   {
     test: /odont[oó]log|dentist|dental/i,
-    filter: '["amenity"="dentist"]',
+    filters: [
+      '["amenity"="dentist"]',
+      '["healthcare"~"^(dentist|dental)$"]',
+      '["office"="dentist"]',
+    ],
   },
   {
     test: /cl[ií]nic|m[eé]dic|salud|hospital|consultori|fisioterap|psic[oó]log|laboratorio/i,
-    filter: '["amenity"~"^(clinic|doctors|hospital|physiotherapist|veterinary)$"]',
+    filters: [
+      '["amenity"~"^(clinic|doctors|hospital|physiotherapist|veterinary)$"]',
+      '["healthcare"~"^(clinic|doctor|hospital)$"]',
+    ],
   },
   {
     test: /farmac|pharmac|droguer|botica/i,
-    filter: '["amenity"="pharmacy"]',
+    filters: ['["amenity"="pharmacy"]'],
   },
   {
     test: /veterinari|veterinar/i,
-    filter: '["amenity"="veterinary"]',
+    filters: ['["amenity"="veterinary"]'],
   },
   {
     test: /hotel|hostal|hosteler|posada|motel|apartahotel/i,
-    filter: '["tourism"~"^(hotel|motel|guest_house|hostel|apartment|chalet)$"]',
+    filters: ['["tourism"~"^(hotel|motel|guest_house|hostel|apartment|chalet)$"]'],
   },
   {
     test: /abogad|jur[ií]dic|lawyer|legal|notar[ií]a/i,
-    filter: '["office"~"^(lawyer|notary)$"]',
+    filters: ['["office"~"^(lawyer|notary)$"]'],
   },
   {
     test: /contador|contable|accountant|contabilidad|auditor/i,
-    filter: '["office"~"^(accountant|tax_advisor)$"]',
+    filters: ['["office"~"^(accountant|tax_advisor)$"]'],
   },
   {
     test: /inmobiliar|real estate|propiedad|bienes ra[ií]ces/i,
-    filter: '["office"~"^(estate_agent|property_management)$"]',
+    filters: ['["office"~"^(estate_agent|property_management)$"]'],
   },
   {
     test: /peluquer|barber|est[eé]tica|sal[oó]n de belleza|beauty|spa\b|u[nñ]as|manicur/i,
-    filter: '["shop"~"^(hairdresser|beauty|nail_salon)$"]',
+    filters: ['["shop"~"^(hairdresser|beauty|nail_salon)$"]'],
   },
   {
     test: /gimnasio|gym|fitness|crossfit|deportiv|spinning|yoga/i,
-    filter: '["leisure"~"^(fitness_centre|sports_centre|pitch|dance)$"]',
+    filters: ['["leisure"~"^(fitness_centre|sports_centre|pitch|dance)$"]'],
   },
   {
     test: /supermerc|supermarket|abarrot|minimarket|mercado|colmado|tienda de barrio/i,
-    filter: '["shop"~"^(supermarket|convenience|grocery|greengrocer|general)$"]',
+    filters: ['["shop"~"^(supermarket|convenience|grocery|greengrocer|general)$"]'],
   },
   {
     test: /ferreter|hardware|construcci|materiales/i,
-    filter: '["shop"~"^(hardware|doityourself|trade|building_materials|paint)$"]',
+    filters: ['["shop"~"^(hardware|doityourself|trade|building_materials|paint)$"]'],
   },
   {
     test: /[oó]ptic|optical|optica|optometr/i,
-    filter: '["shop"~"^(optician|hearing_aids)$"]',
+    filters: ['["shop"~"^(optician|hearing_aids)$"]'],
   },
   {
     test: /joyer|jewel|relojer|orfebre|plater/i,
-    filter: '["shop"~"^(jewelry|watches|goldsmith)$"]',
+    filters: ['["shop"~"^(jewelry|watches|goldsmith)$"]'],
   },
   {
     test: /florister|florist|flores/i,
-    filter: '["shop"="florist"]',
+    filters: ['["shop"="florist"]'],
   },
   {
     test: /zapater|calzado|shoe/i,
-    filter: '["shop"~"^(shoes|shoe)$"]',
+    filters: ['["shop"~"^(shoes|shoe)$"]'],
   },
   {
     test: /ropa|moda|boutique|clothing|bordad|sastrer/i,
-    filter: '["shop"~"^(clothes|boutique|fashion|tailor|fabric)$"]',
+    filters: ['["shop"~"^(clothes|boutique|fashion|tailor|fabric)$"]'],
   },
   {
     test: /librer|bookstore|papeler|imprenta/i,
-    filter: '["shop"~"^(books|stationery|copyshop)$"]',
+    filters: ['["shop"~"^(books|stationery|copyshop)$"]'],
   },
   {
     test: /software|inform[aá]tic|tecnolog|marketing|publicit|dise[nñ]o web|agencia|consultor|desarrollo/i,
-    filter: '["office"~"^(it|advertising_agency|consulting|company)$"]',
+    filters: ['["office"~"^(it|advertising_agency|consulting|company)$"]'],
   },
   {
     test: /constructora|carpinter|electricista|plomer|fontaner|alba[nñ]il|pintor|arquitect/i,
-    filter: '["craft"~"^(carpenter|electrician|plumber|hvac|roofer|painter|builder|architect)$"]',
+    filters: ['["craft"~"^(carpenter|electrician|plumber|hvac|roofer|painter|builder|architect)$"]'],
   },
   {
     test: /colegio|escuela|academ|universidad|educaci|idiomas|instituto/i,
-    filter: '["amenity"~"^(school|college|university|language_school|driving_school|music_school)$"]',
+    filters: ['["amenity"~"^(school|college|university|language_school|driving_school|music_school)$"]'],
   },
   {
     test: /banco|financier|fintech|cooperativa|seguros|asegurador/i,
-    filter: '["amenity"="bank"]',
+    filters: ['["amenity"="bank"]'],
   },
   {
     test: /transporte|log[ií]stica|flete|carga|env[ií]o|paqueter|mudanza/i,
-    filter: '["office"~"^(logistics|moving_company|transport)$"]',
+    filters: ['["office"~"^(logistics|moving_company|transport)$"]'],
   },
   {
     test: /concesionario|automotriz|veh[ií]culos|autos usados|dealership/i,
-    filter: '["shop"~"^(car|motorcycle|truck)$"]',
+    filters: ['["shop"~"^(car|motorcycle|truck)$"]'],
   },
 ];
 
@@ -135,20 +142,21 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function filterForNiche(niche: string): string {
+function filterForNiche(niche: string): string[] {
   const topic = niche.trim();
   for (const rule of NICHE_RULES) {
-    if (rule.test.test(topic)) return rule.filter;
+    if (rule.test.test(topic)) return rule.filters;
   }
-  return `["name"~"${escapeRegex(topic)}",i]`;
+  return [`["name"~"${escapeRegex(topic)}",i]`];
 }
 
-function buildOverpassQuery(filter: string, radius: number, geo: GeoLocation, outCount: number): string {
+function buildOverpassQuery(filters: string[], radius: number, geo: GeoLocation, outCount: number): string {
   const around = `(around:${radius},${geo.latitude},${geo.longitude})`;
+  const lines = filters.map((filter) => `  nwr${filter}${around};`);
   return [
     "[out:json][timeout:25];",
     "(",
-    `  nwr${filter}${around};`,
+    ...lines,
     ");",
     `out tags ${outCount};`,
   ].join("\n");
@@ -241,6 +249,7 @@ function toProspects(
     if (!phone.display && !website && !email) continue;
 
     const addressParts = [
+      tags["addr:full"],
       tags["addr:street"],
       tags["addr:housenumber"],
       tags["addr:district"],
@@ -251,6 +260,11 @@ function toProspects(
       .filter(Boolean);
     const uniqueParts = Array.from(new Set(addressParts));
     const address = uniqueParts.length ? uniqueParts.join(", ") : geo.cityName;
+
+    const social: Prospect["social"] = {};
+    if (tags["contact:facebook"]) social.facebook = tags["contact:facebook"];
+    const whatsappTag = firstValue(tags, ["contact:whatsapp", "whatsapp"]);
+    if (whatsappTag && phone.digits) social.whatsapp = `https://wa.me/${phone.digits}`;
 
     out.push({
       id: makeId(name, website, `osm-${element.type ?? "n"}-${element.id ?? ""}`, email, phone.digits),
@@ -264,7 +278,7 @@ function toProspects(
       ciudad: geo.cityName,
       rubro: categoryOf(tags) || topic,
       emails: email ? [email] : undefined,
-      social: tags["contact:facebook"] ? { facebook: tags["contact:facebook"] } : undefined,
+      social: Object.keys(social).length ? social : undefined,
       enriched: true,
     });
   }
@@ -282,14 +296,38 @@ export async function extractOverpass(
   if (!geo.latitude || !geo.longitude) return [];
 
   const topic = niche.trim() || "negocios";
-  const filter = filterForNiche(topic);
+  const filters = filterForNiche(topic);
   const outCount = Math.min(Math.max(limit * 5, 100), 400);
 
-  for (const radius of [12000, 6000]) {
-    const query = buildOverpassQuery(filter, radius, geo, outCount);
-    const elements = await runOverpassQuery(query);
-    if (elements.length > 0) return toProspects(elements, geo, topic, limit);
+  const seen = new Set<string>();
+  const collected: Prospect[] = [];
+
+  const collect = (prospects: Prospect[]) => {
+    for (const prospect of prospects) {
+      if (seen.has(prospect.id)) continue;
+      seen.add(prospect.id);
+      collected.push(prospect);
+    }
+  };
+
+  collect(await runOverpassRadius(filters, 12000, geo, topic, outCount, limit));
+  if (collected.length < limit) {
+    collect(await runOverpassRadius(filters, 6000, geo, topic, outCount, limit));
   }
 
-  return [];
+  return collected.slice(0, limit);
+}
+
+async function runOverpassRadius(
+  filters: string[],
+  radius: number,
+  geo: GeoLocation,
+  topic: string,
+  outCount: number,
+  limit: number
+): Promise<Prospect[]> {
+  const query = buildOverpassQuery(filters, radius, geo, outCount);
+  const elements = await runOverpassQuery(query);
+  if (elements.length === 0) return [];
+  return toProspects(elements, geo, topic, limit);
 }

@@ -362,6 +362,13 @@ export async function enrichProspect(
     ? await scanWebsite(website, options)
     : { emails: [], phones: [], social: {}, pagesScanned: 0, tech: emptyTechStack() };
 
+  const social = { ...scan.social };
+  if (social.whatsapp) {
+    const rawWaDigits = social.whatsapp.replace(/\D/g, "");
+    const normalized = rawWaDigits ? formatPhone(rawWaDigits, countryCode).digits : "";
+    social.whatsapp = normalized ? `https://wa.me/${normalized}` : scan.social.whatsapp;
+  }
+
   const host = website ? hostOf(normalizeWebsite(website)) : "";
   const allEmails = Array.from(new Set([...scan.emails, existingEmail].filter(Boolean)));
   const ranked = rankEmails(allEmails, host);
@@ -373,14 +380,14 @@ export async function enrichProspect(
       ? await validateEmail(existingEmail)
       : null;
 
-  const waDigits = scan.social.whatsapp ? scan.social.whatsapp.replace(/\D/g, "") : "";
+  const waDigits = social.whatsapp ? social.whatsapp.replace(/\D/g, "") : "";
   const phoneRaw = waDigits || scan.phones[0] || input.telefono || "";
   const phone = phoneRaw ? formatPhone(phoneRaw, countryCode) : { display: "", digits: "" };
 
   return {
     emails: ranked,
     bestEmail,
-    social: scan.social,
+    social,
     phoneDisplay: phone.display,
     phoneDigits: phone.digits,
     validation,

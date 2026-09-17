@@ -41,12 +41,23 @@ export function formatPhone(
   countryCode: string
 ): { display: string; digits: string } {
   const value = (raw ?? "").trim();
+  if (!value) return { display: "", digits: "" };
   let digits = value.replace(/\D/g, "");
   if (!digits) return { display: "", digits: "" };
-  if (value.startsWith("+")) return { display: value, digits };
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (!digits) return { display: "", digits: "" };
+
   const callingCode = callingCodeFor(countryCode);
-  if (callingCode && !digits.startsWith(callingCode)) digits = callingCode + digits;
-  return { display: `+${digits}`, digits };
+  const explicitInternational = value.startsWith("+");
+
+  if (!explicitInternational && callingCode && !digits.startsWith(callingCode) && digits.length <= 11) {
+    digits = callingCode + digits;
+  }
+
+  const prefix = callingCode && digits.startsWith(callingCode) ? callingCode : "";
+  const national = prefix ? digits.slice(prefix.length) : "";
+  const display = national ? `+${prefix} ${national}` : `+${digits}`;
+  return { display, digits };
 }
 
 export function buildQuery(niche: string, city: string): string {
