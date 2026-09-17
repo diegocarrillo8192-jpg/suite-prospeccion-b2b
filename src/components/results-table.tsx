@@ -177,6 +177,10 @@ interface EmailExtractResult {
   emailStatusLabel: string;
   emailReason: string;
   source: "apify" | "html" | "none";
+  techStack?: DetectedTech[];
+  techSsl?: boolean;
+  techServer?: string | null;
+  webOpportunity?: WebOpportunity | null;
 }
 
 interface EmailExtractResponse {
@@ -459,6 +463,10 @@ export function ResultsTable() {
             patch.correo = result.bestEmail;
             foundCount++;
           }
+          if (result.techStack) patch.techStack = result.techStack;
+          if (typeof result.techSsl === "boolean") patch.techSsl = result.techSsl;
+          if (result.techServer !== undefined) patch.techServer = result.techServer;
+          if (result.webOpportunity) patch.webOpportunity = result.webOpportunity;
           updates[result.id] = patch;
         }
       }

@@ -8,6 +8,7 @@ import {
   type SiteContacts,
 } from "@/lib/engines/apify-contacts";
 import { normalizeWebsite } from "@/lib/engines/shared";
+import { emptyTechStack } from "@/lib/tech-detector";
 import type { SocialLinks } from "@/lib/types";
 import { rateLimit } from "@/lib/rate-limit";
 
@@ -124,13 +125,15 @@ export async function POST(request: NextRequest) {
       let emails: string[] = fromApify ? [...fromApify.emails] : [];
       let social: SocialLinks = fromApify ? { ...fromApify.social } : {};
       let source: "apify" | "html" | "none" = fromApify && fromApify.emails.length ? "apify" : "none";
+      let tech = emptyTechStack();
 
-      if (safeWebsite && (emails.length === 0 || Object.keys(social).length === 0)) {
+      if (safeWebsite) {
         const scan = await scanWebsite(safeWebsite, {
           maxPages: 4,
           timeoutMs: 6000,
           concurrency: 3,
         });
+        tech = scan.tech;
         if (emails.length === 0 && scan.emails.length > 0) {
           emails = scan.emails;
           source = "html";
@@ -151,6 +154,10 @@ export async function POST(request: NextRequest) {
         emailStatusLabel: validation?.label ?? "Sin verificar",
         emailReason: validation?.reason ?? "",
         source,
+        techStack: tech.detected,
+        techSsl: tech.ssl,
+        techServer: tech.server,
+        webOpportunity: tech.analyzed ? tech.opportunity : null,
       };
     })
   );
