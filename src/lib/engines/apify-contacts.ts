@@ -55,12 +55,14 @@ function parseItem(item: Record<string, unknown>): SiteContacts {
   const instagram = firstOf(item.instagrams);
   const linkedin = firstOf(item.linkedIns);
   const facebook = firstOf(item.facebooks);
+  const twitter = firstOf(item.twitters) || firstOf(item.twitter);
   const youtube = firstOf(item.youtubes);
   const tiktok = firstOf(item.tiktoks);
   const whatsapp = whatsappLink(item.whatsapps);
   if (instagram) social.instagram = instagram;
   if (linkedin) social.linkedin = linkedin;
   if (facebook) social.facebook = facebook;
+  if (twitter) social.twitter = twitter;
   if (youtube) social.youtube = youtube;
   if (tiktok) social.tiktok = tiktok;
   if (whatsapp) social.whatsapp = whatsapp;

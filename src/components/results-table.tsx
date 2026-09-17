@@ -172,6 +172,7 @@ interface EmailExtractResult {
   id: string;
   emails: string[];
   bestEmail: string;
+  social?: Prospect["social"];
   emailStatus: EmailValidationStatus;
   emailStatusLabel: string;
   emailReason: string;
@@ -451,6 +452,9 @@ export function ResultsTable() {
             enriched: true,
           };
           if (result.emails.length > 0) patch.emails = result.emails;
+          if (result.social && Object.keys(result.social).length > 0) {
+            patch.social = result.social;
+          }
           if (result.bestEmail) {
             patch.correo = result.bestEmail;
             foundCount++;
@@ -524,7 +528,7 @@ export function ResultsTable() {
         const summary = response.summary;
         if (summary) {
           setNotice(
-            `Validación completada: ${summary.valid} válidos, ${summary.risky} arriesgados y ${summary.invalid} inválidos de ${list.length}.`
+            `Validación completada: ${summary.valid} válidos, ${summary.risky} riesgosos y ${summary.invalid} inválidos de ${list.length}.`
           );
         } else {
           setNotice(`Correos validados: ${Object.keys(updates).length} de ${list.length}.`);
@@ -728,7 +732,7 @@ function ResultsToolbar({
           <IconShieldCheck />
           {validating
             ? "Validando…"
-            : `Validar Correos${selectedCount > 0 ? ` (${selectedCount})` : ""}`}
+            : `Validar Correos (MX)${selectedCount > 0 ? ` (${selectedCount})` : ""}`}
         </button>
         <button
           type="button"

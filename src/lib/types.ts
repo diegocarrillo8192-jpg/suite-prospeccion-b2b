@@ -4,6 +4,7 @@ export type SocialPlatform =
   | "instagram"
   | "linkedin"
   | "facebook"
+  | "twitter"
   | "whatsapp"
   | "youtube"
   | "tiktok";

@@ -12,6 +12,7 @@ const SOCIAL_HEADERS: { key: keyof NonNullable<Prospect["social"]>; header: stri
   { key: "instagram", header: "Instagram" },
   { key: "linkedin", header: "LinkedIn" },
   { key: "facebook", header: "Facebook" },
+  { key: "twitter", header: "Twitter / X" },
   { key: "whatsapp", header: "WhatsApp (Red Social)" },
   { key: "youtube", header: "YouTube" },
   { key: "tiktok", header: "TikTok" },

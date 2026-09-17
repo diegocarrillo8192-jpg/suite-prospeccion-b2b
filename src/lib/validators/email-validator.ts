@@ -233,9 +233,9 @@ function labelFor(
   if (status === "valid") return "Válido";
   if (status === "invalid") return "Inválido";
   if (status === "risky") {
-    if (disposable) return "Arriesgado (Desechable)";
-    if (catchAll) return "Arriesgado (Catch-all)";
-    return "Arriesgado";
+    if (disposable) return "Riesgoso (Desechable)";
+    if (catchAll) return "Riesgoso (Catch-all)";
+    return "Riesgoso";
   }
   return "Sin verificar";
 }

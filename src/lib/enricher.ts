@@ -151,6 +151,12 @@ function findSocialLinks(html: string): SocialLinks {
     if (fbShort) social.facebook = `https://facebook.com/${fbShort[1]}`;
   }
 
+  const twitter =
+    /(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\/([A-Za-z0-9_]{2,30})/i.exec(text);
+  if (twitter && !/^(intent|share|home|hashtag|i|search|widgets)$/i.test(twitter[1])) {
+    social.twitter = `https://twitter.com/${twitter[1]}`;
+  }
+
   const waDirect = /(?:https?:\/\/)?(?:www\.)?wa\.me\/(\d{6,15})/i.exec(text);
   const waApi = /(?:api|web)\.whatsapp\.com\/send\?[^"'\s>]*phone=(\d{6,15})/i.exec(text);
   const waScheme = /whatsapp:\/\/send\?[^"'\s>]*phone=(\d{6,15})/i.exec(text);

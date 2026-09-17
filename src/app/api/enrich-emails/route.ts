@@ -8,6 +8,7 @@ import {
   type SiteContacts,
 } from "@/lib/engines/apify-contacts";
 import { normalizeWebsite } from "@/lib/engines/shared";
+import type { SocialLinks } from "@/lib/types";
 import { rateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -121,18 +122,20 @@ export async function POST(request: NextRequest) {
       const fromApify = normalized ? apifyContacts.get(normalized) : undefined;
 
       let emails: string[] = fromApify ? [...fromApify.emails] : [];
+      let social: SocialLinks = fromApify ? { ...fromApify.social } : {};
       let source: "apify" | "html" | "none" = fromApify && fromApify.emails.length ? "apify" : "none";
 
-      if (safeWebsite && emails.length === 0) {
+      if (safeWebsite && (emails.length === 0 || Object.keys(social).length === 0)) {
         const scan = await scanWebsite(safeWebsite, {
           maxPages: 4,
           timeoutMs: 6000,
           concurrency: 3,
         });
-        if (scan.emails.length > 0) {
+        if (emails.length === 0 && scan.emails.length > 0) {
           emails = scan.emails;
           source = "html";
         }
+        social = { ...social, ...scan.social };
       }
 
       const ranked = rankEmails(emails, safeWebsite ? hostOf(safeWebsite) : "");
@@ -143,6 +146,7 @@ export async function POST(request: NextRequest) {
         id: item.id,
         emails: ranked,
         bestEmail,
+        social,
         emailStatus: validation?.status ?? "unknown",
         emailStatusLabel: validation?.label ?? "Sin verificar",
         emailReason: validation?.reason ?? "",
