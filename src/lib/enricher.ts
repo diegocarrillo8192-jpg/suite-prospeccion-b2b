@@ -1,5 +1,5 @@
 import type { EmailValidation, SocialLinks } from "./types";
-import { pickBestEmail, validateEmail } from "./email-validator";
+import { pickBestEmail, validateEmail } from "./validators/email-validator";
 import { formatPhone, normalizeWebsite } from "./engines/shared";
 import { detectTechStack, emptyTechStack, type TechStack } from "./tech-detector";
 import { mapLimit } from "./concurrency";

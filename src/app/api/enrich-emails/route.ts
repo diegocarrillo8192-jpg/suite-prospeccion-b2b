@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { scanWebsite, rankEmails } from "@/lib/enricher";
-import { pickBestEmail, validateEmail } from "@/lib/email-validator";
+import { pickBestEmail, validateEmail } from "@/lib/validators/email-validator";
 import {
   ContactsError,
   extractContactsWithApify,

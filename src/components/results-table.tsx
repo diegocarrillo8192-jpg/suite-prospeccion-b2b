@@ -121,6 +121,15 @@ function IconTrash() {
   );
 }
 
+function IconShieldCheck() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z" />
+      <path d="m9 12 2 2 4-4" />
+    </svg>
+  );
+}
+
 function OpportunityBadge({ opportunity }: { opportunity?: WebOpportunity }) {
   if (!opportunity) return <span className="text-xs text-slate-600">—</span>;
   return (
@@ -173,6 +182,23 @@ interface EmailExtractResponse {
   ok: boolean;
   results: EmailExtractResult[];
   usedApify?: boolean;
+  message?: string;
+}
+
+interface ValidateResult {
+  id: string;
+  emailStatus: EmailValidationStatus;
+  emailStatusLabel: string;
+  emailReason: string;
+  hasMx: boolean;
+  disposable: boolean;
+  catchAll: boolean;
+}
+
+interface ValidateResponse {
+  ok: boolean;
+  results: ValidateResult[];
+  summary?: { valid: number; risky: number; invalid: number; unknown: number };
   message?: string;
 }
 
@@ -239,6 +265,29 @@ async function requestEmailExtraction(
   }
 }
 
+async function requestValidation(items: Prospect[]): Promise<ValidateResponse> {
+  try {
+    const res = await fetch("/api/validate-emails", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: items.map((p) => ({ id: p.id, correo: p.correo })),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || data?.success !== true) {
+      return { ok: false, results: [], message: data?.message ?? "No se pudieron validar los correos." };
+    }
+    return {
+      ok: true,
+      results: Array.isArray(data.results) ? data.results : [],
+      summary: data?.summary,
+    };
+  } catch {
+    return { ok: false, results: [], message: "Error de conexión al validar los correos." };
+  }
+}
+
 function buildPatch(current: Prospect, result: EnrichResult): Partial<Prospect> {
   const patch: Partial<Prospect> = {
     emails: result.emails.length ? result.emails : current.emails,
@@ -279,6 +328,7 @@ export function ResultsTable() {
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [bulkLoading, setBulkLoading] = useState(false);
   const [emailLoading, setEmailLoading] = useState(false);
+  const [validating, setValidating] = useState(false);
   const [exporting, setExporting] = useState<Filters["exporting"]>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -439,6 +489,68 @@ export function ResultsTable() {
     }
   }
 
+  const runValidation = useCallback(
+    async (targets: Prospect[]) => {
+      const list = targets.filter((p) => (p.correo ?? "").trim());
+      if (list.length === 0) {
+        setNotice("Ninguno de los prospectos seleccionados tiene correo para validar.");
+        return;
+      }
+      setNotice(null);
+      const ids = list.map((p) => p.id);
+      setBusy((prev) => {
+        const next = { ...prev };
+        for (const id of ids) next[id] = true;
+        return next;
+      });
+
+      try {
+        const response = await requestValidation(list);
+        if (!response.ok) {
+          setNotice(response.message ?? "No se pudieron validar los correos.");
+          return;
+        }
+
+        const updates: Record<string, Partial<Prospect>> = {};
+        for (const result of response.results) {
+          updates[result.id] = {
+            emailStatus: result.emailStatus,
+            emailStatusLabel: result.emailStatusLabel,
+            emailReason: result.emailReason,
+          };
+        }
+        if (Object.keys(updates).length > 0) updateProspects(updates);
+
+        const summary = response.summary;
+        if (summary) {
+          setNotice(
+            `Validación completada: ${summary.valid} válidos, ${summary.risky} arriesgados y ${summary.invalid} inválidos de ${list.length}.`
+          );
+        } else {
+          setNotice(`Correos validados: ${Object.keys(updates).length} de ${list.length}.`);
+        }
+      } finally {
+        setBusy((prev) => {
+          const next = { ...prev };
+          for (const id of ids) delete next[id];
+          return next;
+        });
+      }
+    },
+    [updateProspects]
+  );
+
+  async function validateEmailsList() {
+    const targets =
+      selectedIds.length > 0 ? prospects.filter((p) => selectedSet.has(p.id)) : prospects;
+    setValidating(true);
+    try {
+      await runValidation(targets);
+    } finally {
+      setValidating(false);
+    }
+  }
+
   function handleClearResults() {
     if (prospects.length === 0) return;
     const confirmed = window.confirm(
@@ -489,6 +601,7 @@ export function ResultsTable() {
         exporting={exporting}
         bulkLoading={bulkLoading}
         emailLoading={emailLoading}
+        validating={validating}
         hasProspects={prospects.length > 0}
         selectedCount={selectedIds.length}
         onExportExcel={handleExportExcel}
@@ -496,6 +609,7 @@ export function ResultsTable() {
         onDownload={() => void handleReport("pdf")}
         onEnrichAll={enrichAll}
         onExtractEmails={extractEmails}
+        onValidateEmails={validateEmailsList}
         onClearResults={handleClearResults}
       />
 
@@ -509,6 +623,7 @@ export function ResultsTable() {
         onSelectAll={selectAll}
         onToggle={toggleSelect}
         onEnrich={(prospect) => void runEnrichment([prospect])}
+        onValidate={(prospect) => void runValidation([prospect])}
       />
     </div>
   );
@@ -518,6 +633,7 @@ function ResultsToolbar({
   exporting,
   bulkLoading,
   emailLoading,
+  validating,
   hasProspects,
   selectedCount,
   onExportExcel,
@@ -525,11 +641,13 @@ function ResultsToolbar({
   onDownload,
   onEnrichAll,
   onExtractEmails,
+  onValidateEmails,
   onClearResults,
 }: {
   exporting: Filters["exporting"];
   bulkLoading: boolean;
   emailLoading: boolean;
+  validating: boolean;
   hasProspects: boolean;
   selectedCount: number;
   onExportExcel: () => void;
@@ -537,6 +655,7 @@ function ResultsToolbar({
   onDownload: () => void;
   onEnrichAll: () => void;
   onExtractEmails: () => void;
+  onValidateEmails: () => void;
   onClearResults: () => void;
 }) {
   return (
@@ -601,6 +720,18 @@ function ResultsToolbar({
         </button>
         <button
           type="button"
+          onClick={onValidateEmails}
+          disabled={validating || !hasProspects}
+          title="Valida sintaxis, registros MX/DNS y detecta dominios catch-all o desechables"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-teal-600/50 bg-teal-500/10 px-3 py-1.5 text-xs font-semibold text-teal-300 transition hover:bg-teal-500/20 disabled:opacity-50"
+        >
+          <IconShieldCheck />
+          {validating
+            ? "Validando…"
+            : `Validar Correos${selectedCount > 0 ? ` (${selectedCount})` : ""}`}
+        </button>
+        <button
+          type="button"
           onClick={onClearResults}
           disabled={!hasProspects}
           title="Vaciar la lista de resultados en pantalla sin borrar el historial guardado"
@@ -630,6 +761,7 @@ function ProspectsTable({
   onSelectAll,
   onToggle,
   onEnrich,
+  onValidate,
 }: {
   prospects: Prospect[];
   selectedSet: Set<string>;
@@ -638,6 +770,7 @@ function ProspectsTable({
   onSelectAll: () => void;
   onToggle: (id: string) => void;
   onEnrich: (prospect: Prospect) => void;
+  onValidate: (prospect: Prospect) => void;
 }) {
   return (
     <div className="overflow-x-auto">
@@ -674,6 +807,7 @@ function ProspectsTable({
               busy={Boolean(busy[p.id])}
               onToggle={onToggle}
               onEnrich={onEnrich}
+              onValidate={onValidate}
             />
           ))}
         </tbody>
@@ -688,12 +822,14 @@ function ProspectRow({
   busy,
   onToggle,
   onEnrich,
+  onValidate,
 }: {
   prospect: Prospect;
   selected: boolean;
   busy: boolean;
   onToggle: (id: string) => void;
   onEnrich: (prospect: Prospect) => void;
+  onValidate: (prospect: Prospect) => void;
 }) {
   const status = prospect.emailStatus ?? "unknown";
   return (
@@ -777,18 +913,36 @@ function ProspectRow({
         <OpportunityBadge opportunity={prospect.webOpportunity} />
       </td>
       <td className="px-3 py-3">
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onEnrich(prospect);
-          }}
-          disabled={!prospect.website || busy}
-          title={prospect.website ? "Re-escanear el sitio web" : "Sin sitio web para analizar"}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {busy ? "Analizando…" : "Enriquecer Contactos"}
-        </button>
+        <div className="flex flex-col items-start gap-1.5">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onValidate(prospect);
+            }}
+            disabled={!(prospect.correo ?? "").trim() || busy}
+            title={
+              (prospect.correo ?? "").trim()
+                ? "Validar sintaxis, MX/DNS y catch-all de este correo"
+                : "Sin correo para validar"
+            }
+            className="inline-flex items-center gap-1.5 rounded-lg border border-teal-700/60 px-2.5 py-1 text-xs font-medium text-teal-300 transition hover:bg-teal-500/15 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {busy ? "Validando…" : "Validar"}
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onEnrich(prospect);
+            }}
+            disabled={!prospect.website || busy}
+            title={prospect.website ? "Re-escanear el sitio web" : "Sin sitio web para analizar"}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {busy ? "Analizando…" : "Enriquecer Contactos"}
+          </button>
+        </div>
       </td>
     </tr>
   );

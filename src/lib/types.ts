@@ -20,6 +20,7 @@ export interface EmailValidation {
   reason: string;
   hasMx: boolean;
   disposable: boolean;
+  catchAll: boolean;
   mxRecords: string[];
 }
 
