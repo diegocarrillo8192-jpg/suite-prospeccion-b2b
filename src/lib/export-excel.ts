@@ -63,6 +63,17 @@ export const EXPORT_COLUMNS: ColumnDef[] = [
   { header: "Enriquecido", value: (p) => (p.enriched ? "Sí" : "No") },
 ];
 
+function columnLetter(index: number): string {
+  let letters = "";
+  let n = index;
+  while (n > 0) {
+    const remainder = (n - 1) % 26;
+    letters = String.fromCharCode(65 + remainder) + letters;
+    n = Math.floor((n - 1) / 26);
+  }
+  return letters;
+}
+
 function autoWidth(header: string, values: (string | number)[], min = 12, max = 50): number {
   let longest = header.length;
   for (const value of values) {
@@ -140,16 +151,6 @@ export async function buildProspectsWorkbook(prospects: Prospect[]) {
       }
       const col = EXPORT_COLUMNS[colNumber - 1];
       if (col?.numeric) cell.alignment = { vertical: "middle", horizontal: "center" };
-      if (col?.header === "Certificado SSL") {
-        const val = String(cell.value ?? "");
-        if (val === "Sí") cell.font = { color: { argb: "FF047857" }, bold: true };
-        else if (val === "No") cell.font = { color: { argb: "FFB91C1C" }, bold: true };
-      }
-      if (col?.header === "Score Oportunidad Web" && typeof cell.value === "number") {
-        const level = p.webOpportunity?.level;
-        if (level === "alta") cell.font = { color: { argb: "FFB45309" }, bold: true };
-        else if (level === "media") cell.font = { color: { argb: "FF0369A1" }, bold: true };
-      }
     });
   });
 
@@ -158,7 +159,72 @@ export async function buildProspectsWorkbook(prospects: Prospect[]) {
     to: { row: 1, column: EXPORT_COLUMNS.length },
   };
 
+  applyConditionalFormatting(sheet, prospects.length);
+
   return workbook;
+}
+
+function applyConditionalFormatting(
+  sheet: import("exceljs").Worksheet,
+  prospectCount: number
+): void {
+  if (prospectCount === 0) return;
+
+  const sslIndex = EXPORT_COLUMNS.findIndex((col) => col.header === "Certificado SSL");
+  const scoreIndex = EXPORT_COLUMNS.findIndex((col) => col.header === "Score Oportunidad Web");
+  if (sslIndex < 0 && scoreIndex < 0) return;
+
+  const lastRow = prospectCount + 1;
+  const green = {
+    font: { color: { argb: "FF047857" }, bold: true },
+    fill: { type: "pattern" as const, pattern: "solid" as const, bgColor: { argb: "FFD1FAE5" } },
+  };
+  const red = {
+    font: { color: { argb: "FFB91C1C" }, bold: true },
+    fill: { type: "pattern" as const, pattern: "solid" as const, bgColor: { argb: "FFFEE2E2" } },
+  };
+
+  if (sslIndex >= 0) {
+    const col = columnLetter(sslIndex + 1);
+    sheet.addConditionalFormatting({
+      ref: `${col}2:${col}${lastRow}`,
+      rules: [
+        {
+          type: "expression",
+          priority: 1,
+          formulae: [`EXACT(${col}2,"Sí")`],
+          style: green,
+        },
+        {
+          type: "expression",
+          priority: 2,
+          formulae: [`EXACT(${col}2,"No")`],
+          style: red,
+        },
+      ],
+    });
+  }
+
+  if (scoreIndex >= 0) {
+    const col = columnLetter(scoreIndex + 1);
+    sheet.addConditionalFormatting({
+      ref: `${col}2:${col}${lastRow}`,
+      rules: [
+        {
+          type: "expression",
+          priority: 1,
+          formulae: [`AND(ISNUMBER(${col}2),${col}2>=55)`],
+          style: green,
+        },
+        {
+          type: "expression",
+          priority: 2,
+          formulae: [`AND(ISNUMBER(${col}2),${col}2<25)`],
+          style: red,
+        },
+      ],
+    });
+  }
 }
 
 export async function exportProspectsToExcel(

@@ -101,6 +101,24 @@ function IconPdf() {
   );
 }
 
+function Spinner() {
+  return (
+    <svg
+      className="h-3.5 w-3.5 animate-spin"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path
+        className="opacity-90"
+        fill="currentColor"
+        d="M4 12a8 8 0 0 1 8-8V0C5.4 0 0 5.4 0 12h4z"
+      />
+    </svg>
+  );
+}
+
 function IconEye() {
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -684,7 +702,7 @@ function ResultsToolbar({
           title="Exportar los prospectos seleccionados (o todos) a Excel .xlsx"
           className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600/50 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20 disabled:opacity-50"
         >
-          <IconExcel />
+          {exporting === "excel" ? <Spinner /> : <IconExcel />}
           {exporting === "excel" ? "Generando…" : "Exportar a Excel (.xlsx)"}
         </button>
         <button
@@ -694,7 +712,7 @@ function ResultsToolbar({
           title="Ver el reporte PDF en una nueva pestaña"
           className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 disabled:opacity-50"
         >
-          <IconEye />
+          {exporting === "preview" ? <Spinner /> : <IconEye />}
           {exporting === "preview" ? "Generando…" : "Vista Previa PDF"}
         </button>
         <button
@@ -704,7 +722,7 @@ function ResultsToolbar({
           title="Descargar el reporte de prospección en PDF"
           className="inline-flex items-center gap-1.5 rounded-lg border border-rose-600/50 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-50"
         >
-          <IconPdf />
+          {exporting === "pdf" ? <Spinner /> : <IconPdf />}
           {exporting === "pdf" ? "Generando…" : "Descargar Reporte PDF"}
         </button>
         <button
