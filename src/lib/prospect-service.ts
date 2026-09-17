@@ -1,6 +1,7 @@
 import { extractProspects, type ExtractionMeta } from "./extract";
 import { extractWithApify } from "./engines/apify";
 import { extractWithGooglePlaces } from "./engines/google-places";
+import { filterProspectsByDomain } from "./engines/domains";
 import {
   ExtractionError,
   type EngineId,
@@ -40,7 +41,7 @@ export async function extractProspectsWithEngine(input: {
   keys: EngineKeys;
 }): Promise<EngineResult> {
   const runner = RUNNERS[input.engine] ?? RUNNERS.free;
-  return runner({
+  const result = await runner({
     niche: input.niche,
     city: input.city,
     limit: input.limit,
@@ -48,4 +49,5 @@ export async function extractProspectsWithEngine(input: {
     apifyActor: input.keys.apifyActor,
     googleKey: input.keys.googleKey,
   });
+  return { ...result, prospects: filterProspectsByDomain(result.prospects) };
 }

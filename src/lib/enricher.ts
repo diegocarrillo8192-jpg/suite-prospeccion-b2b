@@ -2,6 +2,7 @@ import type { EmailValidation, SocialLinks } from "./types";
 import { pickBestEmail, validateEmail } from "./email-validator";
 import { formatPhone, normalizeWebsite } from "./engines/shared";
 import { detectTechStack, emptyTechStack, type TechStack } from "./tech-detector";
+import { mapLimit } from "./concurrency";
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -228,24 +229,6 @@ async function fetchPage(url: string, timeoutMs: number): Promise<FetchedPage | 
   } catch {
     return null;
   }
-}
-
-async function mapLimit<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    while (next < items.length) {
-      const index = next++;
-      results[index] = await fn(items[index]);
-    }
-  };
-  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker);
-  await Promise.all(workers);
-  return results;
 }
 
 export async function scanWebsite(

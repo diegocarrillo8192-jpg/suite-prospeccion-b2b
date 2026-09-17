@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { useAppState } from "./app-state";
 import { formatPhoneForWa, mapsUrl } from "@/lib/format";
+import { mapLimit } from "@/lib/concurrency";
 import { exportProspectsToExcel } from "@/lib/export-excel";
 import { downloadProspectReport, previewProspectReport } from "@/lib/export-pdf";
 import { SocialBadges } from "./social-icons";
@@ -135,9 +136,19 @@ interface EnrichResult {
   webOpportunity?: WebOpportunity | null;
 }
 
-async function requestEnrichment(
-  items: Prospect[]
-): Promise<{ ok: boolean; results: EnrichResult[]; message?: string }> {
+interface EnrichResponse {
+  ok: boolean;
+  results: EnrichResult[];
+  message?: string;
+}
+
+interface Filters {
+  selectedIds: string[];
+  busy: Record<string, boolean>;
+  exporting: null | "excel" | "pdf" | "preview";
+}
+
+async function requestEnrichment(items: Prospect[]): Promise<EnrichResponse> {
   try {
     const res = await fetch("/api/enrich", {
       method: "POST",
@@ -187,11 +198,13 @@ export function ResultsTable() {
   const { prospects, selectedIds, toggleSelect, selectAll, updateProspects } = useAppState();
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [bulkLoading, setBulkLoading] = useState(false);
-  const [exporting, setExporting] = useState<null | "excel" | "pdf" | "preview">(null);
+  const [exporting, setExporting] = useState<Filters["exporting"]>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const selectedSet = new Set(selectedIds);
   const allSelected = prospects.length > 0 && selectedIds.length === prospects.length;
+  const exportTargets =
+    selectedIds.length > 0 ? prospects.filter((p) => selectedSet.has(p.id)) : prospects;
 
   const runEnrichment = useCallback(
     async (targets: Prospect[]) => {
@@ -208,20 +221,26 @@ export function ResultsTable() {
         return next;
       });
 
+      const chunks: Prospect[][] = [];
+      const chunkSize = 8;
+      for (let i = 0; i < list.length; i += chunkSize) {
+        chunks.push(list.slice(i, i + chunkSize));
+      }
+
+      const responses = await mapLimit(chunks, 4, (chunk) => requestEnrichment(chunk));
+      const byId = new Map(list.map((prospect): [string, Prospect] => [prospect.id, prospect]));
+
       const updates: Record<string, Partial<Prospect>> = {};
       let enrichedCount = 0;
-      const chunkSize = 8;
       let failure: string | null = null;
 
-      for (let i = 0; i < list.length; i += chunkSize) {
-        const chunk = list.slice(i, i + chunkSize);
-        const { ok, results, message } = await requestEnrichment(chunk);
-        if (!ok) {
-          failure = message ?? "No se pudo enriquecer.";
+      for (const response of responses) {
+        if (!response.ok) {
+          failure = response.message ?? "No se pudo enriquecer.";
           continue;
         }
-        for (const result of results) {
-          const current = list.find((p) => p.id === result.id);
+        for (const result of response.results) {
+          const current = byId.get(result.id);
           if (!current) continue;
           updates[result.id] = buildPatch(current, result);
           if (result.enriched) enrichedCount++;
@@ -248,7 +267,8 @@ export function ResultsTable() {
   );
 
   async function enrichAll() {
-    const targets = selectedIds.length > 0 ? prospects.filter((p) => selectedSet.has(p.id)) : prospects;
+    const targets =
+      selectedIds.length > 0 ? prospects.filter((p) => selectedSet.has(p.id)) : prospects;
     setBulkLoading(true);
     try {
       await runEnrichment(targets);
@@ -256,9 +276,6 @@ export function ResultsTable() {
       setBulkLoading(false);
     }
   }
-
-  const exportTargets =
-    selectedIds.length > 0 ? prospects.filter((p) => selectedSet.has(p.id)) : prospects;
 
   async function handleExportExcel() {
     if (exportTargets.length === 0 || exporting) return;
@@ -295,191 +312,279 @@ export function ResultsTable() {
 
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-800 bg-[#0f172a]">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
-        <p className="text-xs text-slate-500">
-          Enriquecimiento profundo con validación MX/DNS, redes sociales, detector de stack web y
-          oportunidad para agencia.
-        </p>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={handleExportExcel}
-            disabled={Boolean(exporting) || prospects.length === 0}
-            title="Exportar los prospectos seleccionados (o todos) a Excel .xlsx"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600/50 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20 disabled:opacity-50"
-          >
-            <IconExcel />
-            {exporting === "excel" ? "Generando…" : "Exportar a Excel (.xlsx)"}
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleReport("preview")}
-            disabled={Boolean(exporting) || prospects.length === 0}
-            title="Ver el reporte PDF en una nueva pestaña"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 disabled:opacity-50"
-          >
-            <IconEye />
-            {exporting === "preview" ? "Generando…" : "Vista Previa PDF"}
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleReport("pdf")}
-            disabled={Boolean(exporting) || prospects.length === 0}
-            title="Descargar el reporte de prospección en PDF"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-rose-600/50 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-50"
-          >
-            <IconPdf />
-            {exporting === "pdf" ? "Generando…" : "Descargar Reporte PDF"}
-          </button>
-          <button
-            type="button"
-            onClick={enrichAll}
-            disabled={bulkLoading}
-            className="rounded-lg border border-sky-600/50 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/20 disabled:opacity-50"
-          >
-            {bulkLoading
-              ? "Enriqueciendo…"
-              : `Enriquecer Contactos${selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}`}
-          </button>
-        </div>
-      </div>
+      <ResultsToolbar
+        exporting={exporting}
+        bulkLoading={bulkLoading}
+        hasProspects={prospects.length > 0}
+        selectedCount={selectedIds.length}
+        onExportExcel={handleExportExcel}
+        onPreview={() => void handleReport("preview")}
+        onDownload={() => void handleReport("pdf")}
+        onEnrichAll={enrichAll}
+      />
 
-      {notice && (
-        <div className="border-b border-slate-800 bg-slate-900/50 px-4 py-2 text-xs text-slate-400">
-          {notice}
-        </div>
-      )}
+      {notice && <NoticeBar notice={notice} />}
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[1560px] border-collapse text-left text-sm">
-          <thead>
-            <tr className="border-b border-slate-800 text-xs uppercase tracking-wide text-slate-500">
-              <th className="w-10 px-4 py-3">
-                <input
-                  type="checkbox"
-                  checked={allSelected}
-                  onChange={selectAll}
-                  className="h-4 w-4 accent-sky-500"
-                  aria-label="Seleccionar todo"
-                />
-              </th>
-              <th className="px-3 py-3 font-medium">Empresa</th>
-              <th className="px-3 py-3 font-medium">Correo</th>
-              <th className="px-3 py-3 font-medium">Teléfono</th>
-              <th className="px-3 py-3 font-medium">Redes Sociales</th>
-              <th className="px-3 py-3 font-medium">WhatsApp</th>
-              <th className="px-3 py-3 font-medium">Dirección</th>
-              <th className="px-3 py-3 font-medium">Sitio Web</th>
-              <th className="px-3 py-3 font-medium">Tecnologías</th>
-              <th className="px-3 py-3 font-medium">Oportunidad Web</th>
-              <th className="px-3 py-3 font-medium">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {prospects.map((p) => {
-              const sel = selectedSet.has(p.id);
-              const status = p.emailStatus ?? "unknown";
-              return (
-                <tr
-                  key={p.id}
-                  onClick={() => toggleSelect(p.id)}
-                  className={`cursor-pointer border-b border-slate-800/60 transition-colors ${
-                    sel ? "bg-sky-500/5" : "hover:bg-slate-800/40"
-                  }`}
-                >
-                  <td className="px-4 py-3">
-                    <input
-                      type="checkbox"
-                      checked={sel}
-                      readOnly
-                      className="pointer-events-none h-4 w-4 accent-sky-500"
-                      aria-label={`Seleccionar ${p.empresa}`}
-                    />
-                  </td>
-                  <td className="px-3 py-3 font-medium text-slate-100">{p.empresa}</td>
-                  <td className="px-3 py-3">
-                    <div className="flex flex-col items-start gap-1.5">
-                      <span className="text-slate-300">{p.correo}</span>
-                      <span
-                        title={p.emailReason || "Correo no verificado"}
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium ${STATUS_STYLES[status]}`}
-                      >
-                        <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[status]}`} />
-                        {p.emailStatusLabel ?? "Sin verificar"}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-3 text-slate-300">{p.telefono}</td>
-                  <td className="px-3 py-3">
-                    <SocialBadges social={p.social} />
-                  </td>
-                  <td className="px-3 py-3">
-                    {p.whatsapp ? (
-                      <a
-                        href={`https://wa.me/${formatPhoneForWa(p.whatsapp)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/15 px-2.5 py-1 text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/25"
-                      >
-                        WhatsApp
-                      </a>
-                    ) : (
-                      <span className="text-xs text-slate-600">—</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-3">
-                    <a
-                      href={mapsUrl(p.direccion)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-slate-700/40 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-700/70"
-                    >
-                      Mapa
-                    </a>
-                  </td>
-                  <td className="px-3 py-3">
-                    {p.website ? (
-                      <a
-                        href={p.website}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-sky-400 hover:underline"
-                      >
-                        {p.website.replace(/^https?:\/\//, "").slice(0, 34)}
-                      </a>
-                    ) : (
-                      <span className="text-xs text-slate-600">No disponible</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-3">
-                    <TechBadges tech={p.techStack} ssl={p.techSsl} />
-                  </td>
-                  <td className="px-3 py-3">
-                    <OpportunityBadge opportunity={p.webOpportunity} />
-                  </td>
-                  <td className="px-3 py-3">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void runEnrichment([p]);
-                      }}
-                      disabled={!p.website || Boolean(busy[p.id])}
-                      title={p.website ? "Re-escanear el sitio web" : "Sin sitio web para analizar"}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      {busy[p.id] ? "Analizando…" : "Enriquecer Contactos"}
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <ProspectsTable
+        prospects={prospects}
+        selectedSet={selectedSet}
+        allSelected={allSelected}
+        busy={busy}
+        onSelectAll={selectAll}
+        onToggle={toggleSelect}
+        onEnrich={(prospect) => void runEnrichment([prospect])}
+      />
+    </div>
+  );
+}
+
+function ResultsToolbar({
+  exporting,
+  bulkLoading,
+  hasProspects,
+  selectedCount,
+  onExportExcel,
+  onPreview,
+  onDownload,
+  onEnrichAll,
+}: {
+  exporting: Filters["exporting"];
+  bulkLoading: boolean;
+  hasProspects: boolean;
+  selectedCount: number;
+  onExportExcel: () => void;
+  onPreview: () => void;
+  onDownload: () => void;
+  onEnrichAll: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
+      <p className="text-xs text-slate-500">
+        Enriquecimiento profundo con validación MX/DNS, redes sociales, detector de stack web y
+        oportunidad para agencia.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={onExportExcel}
+          disabled={Boolean(exporting) || !hasProspects}
+          title="Exportar los prospectos seleccionados (o todos) a Excel .xlsx"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600/50 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20 disabled:opacity-50"
+        >
+          <IconExcel />
+          {exporting === "excel" ? "Generando…" : "Exportar a Excel (.xlsx)"}
+        </button>
+        <button
+          type="button"
+          onClick={onPreview}
+          disabled={Boolean(exporting) || !hasProspects}
+          title="Ver el reporte PDF en una nueva pestaña"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 disabled:opacity-50"
+        >
+          <IconEye />
+          {exporting === "preview" ? "Generando…" : "Vista Previa PDF"}
+        </button>
+        <button
+          type="button"
+          onClick={onDownload}
+          disabled={Boolean(exporting) || !hasProspects}
+          title="Descargar el reporte de prospección en PDF"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-rose-600/50 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-50"
+        >
+          <IconPdf />
+          {exporting === "pdf" ? "Generando…" : "Descargar Reporte PDF"}
+        </button>
+        <button
+          type="button"
+          onClick={onEnrichAll}
+          disabled={bulkLoading}
+          className="rounded-lg border border-sky-600/50 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/20 disabled:opacity-50"
+        >
+          {bulkLoading
+            ? "Enriqueciendo…"
+            : `Enriquecer Contactos${selectedCount > 0 ? ` (${selectedCount})` : ""}`}
+        </button>
       </div>
     </div>
+  );
+}
+
+function NoticeBar({ notice }: { notice: string }) {
+  return (
+    <div className="border-b border-slate-800 bg-slate-900/50 px-4 py-2 text-xs text-slate-400">
+      {notice}
+    </div>
+  );
+}
+
+function ProspectsTable({
+  prospects,
+  selectedSet,
+  allSelected,
+  busy,
+  onSelectAll,
+  onToggle,
+  onEnrich,
+}: {
+  prospects: Prospect[];
+  selectedSet: Set<string>;
+  allSelected: boolean;
+  busy: Record<string, boolean>;
+  onSelectAll: () => void;
+  onToggle: (id: string) => void;
+  onEnrich: (prospect: Prospect) => void;
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[1560px] border-collapse text-left text-sm">
+        <thead>
+          <tr className="border-b border-slate-800 text-xs uppercase tracking-wide text-slate-500">
+            <th className="w-10 px-4 py-3">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={onSelectAll}
+                className="h-4 w-4 accent-sky-500"
+                aria-label="Seleccionar todo"
+              />
+            </th>
+            <th className="px-3 py-3 font-medium">Empresa</th>
+            <th className="px-3 py-3 font-medium">Correo</th>
+            <th className="px-3 py-3 font-medium">Teléfono</th>
+            <th className="px-3 py-3 font-medium">Redes Sociales</th>
+            <th className="px-3 py-3 font-medium">WhatsApp</th>
+            <th className="px-3 py-3 font-medium">Dirección</th>
+            <th className="px-3 py-3 font-medium">Sitio Web</th>
+            <th className="px-3 py-3 font-medium">Tecnologías</th>
+            <th className="px-3 py-3 font-medium">Oportunidad Web</th>
+            <th className="px-3 py-3 font-medium">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {prospects.map((p) => (
+            <ProspectRow
+              key={p.id}
+              prospect={p}
+              selected={selectedSet.has(p.id)}
+              busy={Boolean(busy[p.id])}
+              onToggle={onToggle}
+              onEnrich={onEnrich}
+            />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ProspectRow({
+  prospect,
+  selected,
+  busy,
+  onToggle,
+  onEnrich,
+}: {
+  prospect: Prospect;
+  selected: boolean;
+  busy: boolean;
+  onToggle: (id: string) => void;
+  onEnrich: (prospect: Prospect) => void;
+}) {
+  const status = prospect.emailStatus ?? "unknown";
+  return (
+    <tr
+      onClick={() => onToggle(prospect.id)}
+      className={`cursor-pointer border-b border-slate-800/60 transition-colors ${
+        selected ? "bg-sky-500/5" : "hover:bg-slate-800/40"
+      }`}
+    >
+      <td className="px-4 py-3">
+        <input
+          type="checkbox"
+          checked={selected}
+          readOnly
+          className="pointer-events-none h-4 w-4 accent-sky-500"
+          aria-label={`Seleccionar ${prospect.empresa}`}
+        />
+      </td>
+      <td className="px-3 py-3 font-medium text-slate-100">{prospect.empresa}</td>
+      <td className="px-3 py-3">
+        <div className="flex flex-col items-start gap-1.5">
+          <span className="text-slate-300">{prospect.correo}</span>
+          <span
+            title={prospect.emailReason || "Correo no verificado"}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium ${STATUS_STYLES[status]}`}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[status]}`} />
+            {prospect.emailStatusLabel ?? "Sin verificar"}
+          </span>
+        </div>
+      </td>
+      <td className="px-3 py-3 text-slate-300">{prospect.telefono}</td>
+      <td className="px-3 py-3">
+        <SocialBadges social={prospect.social} />
+      </td>
+      <td className="px-3 py-3">
+        {prospect.whatsapp ? (
+          <a
+            href={`https://wa.me/${formatPhoneForWa(prospect.whatsapp)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/15 px-2.5 py-1 text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/25"
+          >
+            WhatsApp
+          </a>
+        ) : (
+          <span className="text-xs text-slate-600">—</span>
+        )}
+      </td>
+      <td className="px-3 py-3">
+        <a
+          href={mapsUrl(prospect.direccion)}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-slate-700/40 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-700/70"
+        >
+          Mapa
+        </a>
+      </td>
+      <td className="px-3 py-3">
+        {prospect.website ? (
+          <a
+            href={prospect.website}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="text-sky-400 hover:underline"
+          >
+            {prospect.website.replace(/^https?:\/\//, "").slice(0, 34)}
+          </a>
+        ) : (
+          <span className="text-xs text-slate-600">No disponible</span>
+        )}
+      </td>
+      <td className="px-3 py-3">
+        <TechBadges tech={prospect.techStack} ssl={prospect.techSsl} />
+      </td>
+      <td className="px-3 py-3">
+        <OpportunityBadge opportunity={prospect.webOpportunity} />
+      </td>
+      <td className="px-3 py-3">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEnrich(prospect);
+          }}
+          disabled={!prospect.website || busy}
+          title={prospect.website ? "Re-escanear el sitio web" : "Sin sitio web para analizar"}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {busy ? "Analizando…" : "Enriquecer Contactos"}
+        </button>
+      </td>
+    </tr>
   );
 }

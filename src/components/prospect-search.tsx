@@ -64,7 +64,7 @@ function engineHint(engine: EngineId, apifyReady: boolean, googleReady: boolean)
       ? "Usará la API oficial de Google Places (requiere facturación activa)."
       : "Añade tu API Key de Google Cloud para usar este motor.";
   }
-  return "Web scraping directo en Bing y DuckDuckGo. Sin API Key.";
+  return "Scraping local: OpenStreetMap (Overpass) + Google Maps y buscadores web. Sin API Key.";
 }
 
 function useProspectSearch() {

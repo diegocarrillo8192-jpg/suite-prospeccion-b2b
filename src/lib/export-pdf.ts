@@ -72,8 +72,10 @@ export async function buildProspectReport(
   prospects: Prospect[],
   options: ProspectReportOptions = {}
 ) {
-  const { jsPDF } = await import("jspdf");
-  const { autoTable } = await import("jspdf-autotable");
+  const [{ jsPDF }, { autoTable }] = await Promise.all([
+    import("jspdf"),
+    import("jspdf-autotable"),
+  ]);
 
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -273,5 +275,5 @@ export async function previewProspectReport(
 ): Promise<void> {
   const doc = await buildProspectReport(prospects, options);
   const blobUrl = doc.output("bloburl");
-  window.open(blobUrl as unknown as string, "_blank");
+  window.open(blobUrl as unknown as string, "_blank", "noopener,noreferrer");
 }
