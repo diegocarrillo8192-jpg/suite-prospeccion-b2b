@@ -1,7 +1,7 @@
 import type { EmailValidation, Prospect, SocialLinks } from "./types";
 import { callingCodeFor, countryNameFor } from "./country-codes";
 import { enrichProspect } from "./enricher";
-import { isAllowedWebsite, isForeignTld } from "./engines/domains";
+import { domainPriority, isAllowedWebsite, isForeignTld } from "./engines/domains";
 import { extractOverpass } from "./engines/overpass";
 import { extractGoogleMapsPublic } from "./engines/google-maps";
 import { planQueries } from "./engines/query";
@@ -331,6 +331,13 @@ function dedupResults(list: SearchResult[]): SearchResult[] {
   return out;
 }
 
+function prioritizeResults(list: SearchResult[], countryCode: string): SearchResult[] {
+  return list
+    .map((result, index) => ({ result, index, rank: domainPriority(result.url, countryCode) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map((entry) => entry.result);
+}
+
 function mapConcurrency<T, R>(
   items: T[],
   limit: number,
@@ -442,12 +449,19 @@ function hostKey(url: string): string {
   return safeHost(url).replace(/^www\./, "");
 }
 
-function buildFallbackVariants(topic: string, city: string, plan: { variants: string[] }): string[] {
+function buildFallbackVariants(
+  topic: string,
+  city: string,
+  countryName: string,
+  plan: { variants: string[] }
+): string[] {
   if (plan.variants.length) return plan.variants;
-  const c = city.trim();
   const t = topic.trim();
-  if (!c) return [t];
-  return [`${t} ${c}`, `${c} ${t}`, `directorio de ${t} en ${c}`];
+  const c = city.trim();
+  const parts = [`"${t}"`];
+  if (c) parts.push(`"${c}"`);
+  if (countryName) parts.push(`"${countryName}"`);
+  return [parts.join(" ")];
 }
 
 export async function extractProspects(
@@ -492,8 +506,11 @@ export async function extractProspects(
     bingResults.push(...bingPage2);
   }
 
-  const webResults = dedupResults(interleave(bingResults, ddgResults)).filter(
-    (r) => !isForeignTld(safeHost(r.url), countryCode)
+  const webResults = prioritizeResults(
+    dedupResults(interleave(bingResults, ddgResults)).filter(
+      (r) => !isForeignTld(safeHost(r.url), countryCode)
+    ),
+    countryCode
   );
   const direct = dedupeProspects([...overpassProspects, ...mapsProspects]).slice(0, limit);
   const remaining = Math.max(0, limit - direct.length);
@@ -531,15 +548,18 @@ export async function extractProspects(
 
   let secondPassUsed = false;
   if (prospects.length < limit) {
-    const variants = buildFallbackVariants(topic, cityName, plan);
+    const variants = buildFallbackVariants(topic, cityName, countryName, plan);
     for (const variant of variants.slice(0, 4)) {
       if (prospects.length >= limit) break;
       const [bingV, ddgV] = await Promise.all([
         searchBing(variant, 20, 1),
         searchDuckDuckGo(variant),
       ]);
-      const results = dedupResults(interleave(bingV, ddgV)).filter(
-        (r) => !isForeignTld(safeHost(r.url), countryCode) && !usedHosts.has(hostKey(r.url))
+      const results = prioritizeResults(
+        dedupResults(interleave(bingV, ddgV)).filter(
+          (r) => !isForeignTld(safeHost(r.url), countryCode) && !usedHosts.has(hostKey(r.url))
+        ),
+        countryCode
       );
       if (!results.length) continue;
       const needed = limit - prospects.length;

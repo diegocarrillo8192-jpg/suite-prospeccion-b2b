@@ -48,6 +48,14 @@ const NICHE_SYNONYMS: NicheSynonyms[] = [
   },
 ];
 
+const COUNTRY_LOCAL: Record<string, { tld: string; alt: string }> = {
+  panama: { tld: "pa", alt: "Panama" },
+};
+
+function stripAccents(value: string): string {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
 function buildLocation(city: string, countryName: string): string {
   const c = city.trim();
   const country = countryName.trim();
@@ -58,6 +66,25 @@ function buildLocation(city: string, countryName: string): string {
     return c;
   }
   return `${c}, ${country}`;
+}
+
+function countryClause(countryName: string): string {
+  const name = countryName.trim();
+  if (!name) return "";
+  const local = COUNTRY_LOCAL[stripAccents(name).toLowerCase()];
+  if (local) return `"${name}" site:.${local.tld} OR "${local.alt}"`;
+  return `"${name}"`;
+}
+
+function buildWebPhrase(term: string, city: string, countryName: string): string {
+  const parts = [`"${term.trim()}"`];
+  const c = city.trim();
+  if (c && stripAccents(c).toLowerCase() !== stripAccents(countryName).toLowerCase()) {
+    parts.push(`"${c}"`);
+  }
+  const clause = countryClause(countryName);
+  if (clause) parts.push(clause);
+  return parts.join(" ");
 }
 
 export function planQueries(niche: string, city: string, countryName: string): QueryPlan {
@@ -76,16 +103,21 @@ export function planQueries(niche: string, city: string, countryName: string): Q
     phrases.push(phrase);
   }
 
-  const [primary, ...rest] = phrases;
-  const orPhrases = phrases.slice(0, 3);
-  const query =
-    orPhrases.length > 1
-      ? `(${orPhrases.map((p) => `"${p}"`).join(" OR ")})`
-      : `"${primary ?? location ?? topic}"`;
+  const quotedTerms = terms.slice(0, 3).map((term) => `"${term.trim()}"`);
+  const termGroup =
+    quotedTerms.length > 1 ? `(${quotedTerms.join(" OR ")})` : quotedTerms[0] ?? `"${topic}"`;
+
+  const parts = [termGroup];
+  const c = city.trim();
+  if (c && stripAccents(c).toLowerCase() !== stripAccents(countryName).toLowerCase()) {
+    parts.push(`"${c}"`);
+  }
+  const clause = countryClause(countryName);
+  if (clause) parts.push(clause);
 
   return {
-    query,
-    phrase: primary ?? location ?? topic,
-    variants: rest,
+    query: parts.join(" "),
+    phrase: phrases[0] ?? location ?? topic,
+    variants: terms.slice(1, 4).map((term) => buildWebPhrase(term, city, countryName)),
   };
 }

@@ -36,21 +36,59 @@ export function normalizeWebsite(raw: string): string {
   }
 }
 
+const PANAMA_CODE = "507";
+const PANAMA_MOBILE = /^6\d{7}$/;
+const PANAMA_FIXED = /^[234789]\d{6,7}$/;
+const PANAMA_TOLL_FREE = /^1?800\d{7}$/;
+
+export function isValidPanamaNational(national: string): boolean {
+  if (!/^\d+$/.test(national)) return false;
+  if (PANAMA_TOLL_FREE.test(national)) return false;
+  return PANAMA_MOBILE.test(national) || PANAMA_FIXED.test(national);
+}
+
+function panamaDisplay(national: string): { display: string; digits: string } {
+  return { display: `+${PANAMA_CODE} ${national}`, digits: `${PANAMA_CODE}${national}` };
+}
+
+function formatPanamaPhone(
+  digits: string,
+  explicitInternational: boolean
+): { display: string; digits: string } {
+  const empty = { display: "", digits: "" };
+  if (explicitInternational) {
+    if (!digits.startsWith(PANAMA_CODE)) return empty;
+    const national = digits.slice(PANAMA_CODE.length);
+    return isValidPanamaNational(national) ? panamaDisplay(national) : empty;
+  }
+
+  if (digits.startsWith(PANAMA_CODE)) {
+    const national = digits.slice(PANAMA_CODE.length);
+    if (isValidPanamaNational(national)) return panamaDisplay(national);
+  }
+
+  return isValidPanamaNational(digits) ? panamaDisplay(digits) : empty;
+}
+
 export function formatPhone(
   raw: string,
   countryCode: string
 ): { display: string; digits: string } {
   const value = (raw ?? "").trim();
   if (!value) return { display: "", digits: "" };
+  const explicitInternational = value.startsWith("+") || value.startsWith("00");
   let digits = value.replace(/\D/g, "");
   if (!digits) return { display: "", digits: "" };
   if (digits.startsWith("00")) digits = digits.slice(2);
   if (!digits) return { display: "", digits: "" };
 
-  const callingCode = callingCodeFor(countryCode);
-  const explicitInternational = value.startsWith("+");
+  const target = (countryCode ?? "").trim().toUpperCase();
+  if (target === "PA") return formatPanamaPhone(digits, explicitInternational);
 
-  if (!explicitInternational && callingCode && !digits.startsWith(callingCode) && digits.length <= 11) {
+  const callingCode = callingCodeFor(target);
+  const explicitPlus = value.startsWith("+");
+
+  if (!explicitPlus && callingCode && !digits.startsWith(callingCode) && digits.length <= 11) {
     digits = callingCode + digits;
   }
 

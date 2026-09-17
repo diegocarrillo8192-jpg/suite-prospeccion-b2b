@@ -22,6 +22,35 @@ export const EXCLUDED_DOMAINS: readonly string[] = [
   "zonebourse.com",
   "yahoo.com",
   "degustapanama.com",
+  "reddit.com",
+  "github.com",
+  "steamcommunity.com",
+  "slideshare.net",
+  "scribd.com",
+];
+
+export const GLOBAL_CONTENT_DOMAINS: readonly string[] = [
+  "medium.com",
+  "quora.com",
+  "blogspot.com",
+  "wordpress.com",
+  "stackexchange.com",
+  "stackoverflow.com",
+  "change.org",
+  "kickstarter.com",
+  "gofundme.com",
+  "news.google.com",
+  "cnn.com",
+  "bbc.com",
+  "bbc.co.uk",
+  "nytimes.com",
+  "forbes.com",
+  "techcrunch.com",
+  "reuters.com",
+  "bloomberg.com",
+  "elpais.com",
+  "elmundo.es",
+  "lanacion.com",
 ];
 
 export function hostnameOf(value: string): string {
@@ -45,6 +74,12 @@ export function isAllowedWebsite(value: string): boolean {
   const host = hostnameOf(value);
   if (!host) return false;
   return !isExcludedDomain(host);
+}
+
+export function isGlobalContentDomain(value: string): boolean {
+  const host = hostnameOf(value);
+  if (!host) return false;
+  return GLOBAL_CONTENT_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`));
 }
 
 const CCTLD_TO_COUNTRY: Record<string, string> = {
@@ -151,4 +186,13 @@ export function isForeignTld(host: string, countryCode: string): boolean {
 
 export function filterProspectsByDomain<T extends { website: string }>(prospects: T[]): T[] {
   return prospects.filter((prospect) => !prospect.website || isAllowedWebsite(prospect.website));
+}
+
+export function domainPriority(value: string, countryCode: string): number {
+  const host = hostnameOf(value);
+  if (!host) return 1;
+  if (isGlobalContentDomain(host)) return 3;
+  const target = (countryCode ?? "").trim().toUpperCase();
+  if (target && countryOfHost(host) === target) return 0;
+  return 1;
 }
