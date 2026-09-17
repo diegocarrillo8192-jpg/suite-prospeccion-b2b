@@ -268,12 +268,3 @@ export async function downloadProspectReport(
   const doc = await buildProspectReport(prospects, options);
   doc.save(`reporte-prospeccion-${stamp()}.pdf`);
 }
-
-export async function previewProspectReport(
-  prospects: Prospect[],
-  options: ProspectReportOptions = {}
-): Promise<void> {
-  const doc = await buildProspectReport(prospects, options);
-  const blobUrl = doc.output("bloburl");
-  window.open(blobUrl as unknown as string, "_blank", "noopener,noreferrer");
-}

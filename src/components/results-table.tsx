@@ -11,7 +11,7 @@ import {
   type ProviderConfig,
 } from "@/lib/providers";
 import { exportProspectsToExcel } from "@/lib/export-excel";
-import { downloadProspectReport, previewProspectReport } from "@/lib/export-pdf";
+import { downloadProspectReport } from "@/lib/export-pdf";
 import { SocialBadges } from "./social-icons";
 import type { EmailValidationStatus, Prospect } from "@/lib/types";
 import type {
@@ -119,15 +119,6 @@ function Spinner() {
   );
 }
 
-function IconEye() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
-  );
-}
-
 function IconTrash() {
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -159,31 +150,6 @@ function OpportunityBadge({ opportunity }: { opportunity?: WebOpportunity }) {
       <span className="text-[10px] font-normal opacity-80">{opportunity.score}/100</span>
     </span>
   );
-}
-
-interface EnrichResult {
-  id: string;
-  emails: string[];
-  bestEmail: string;
-  social: Prospect["social"];
-  phoneDisplay: string;
-  phoneDigits: string;
-  emailStatus: EmailValidationStatus;
-  emailStatusLabel: string;
-  emailReason: string;
-  hasMx: boolean;
-  disposable: boolean;
-  enriched: boolean;
-  techStack?: DetectedTech[];
-  techSsl?: boolean;
-  techServer?: string | null;
-  webOpportunity?: WebOpportunity | null;
-}
-
-interface EnrichResponse {
-  ok: boolean;
-  results: EnrichResult[];
-  message?: string;
 }
 
 interface EmailExtractResult {
@@ -228,31 +194,7 @@ interface ValidateResponse {
 interface Filters {
   selectedIds: string[];
   busy: Record<string, boolean>;
-  exporting: null | "excel" | "pdf" | "preview";
-}
-
-async function requestEnrichment(items: Prospect[]): Promise<EnrichResponse> {
-  try {
-    const res = await fetch("/api/enrich", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        items: items.map((p) => ({
-          id: p.id,
-          website: p.website,
-          correo: p.correo,
-          telefono: p.telefono,
-        })),
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok || data?.success !== true) {
-      return { ok: false, results: [], message: data?.message ?? "No se pudo enriquecer." };
-    }
-    return { ok: true, results: Array.isArray(data.results) ? data.results : [] };
-  } catch {
-    return { ok: false, results: [], message: "Error de conexión al enriquecer." };
-  }
+  exporting: null | "excel" | "pdf";
 }
 
 async function requestEmailExtraction(
@@ -311,28 +253,6 @@ async function requestValidation(items: Prospect[]): Promise<ValidateResponse> {
   }
 }
 
-function buildPatch(current: Prospect, result: EnrichResult): Partial<Prospect> {
-  const patch: Partial<Prospect> = {
-    emails: result.emails.length ? result.emails : current.emails,
-    social:
-      result.social && Object.keys(result.social).length ? result.social : current.social,
-    emailStatus: result.emailStatus,
-    emailStatusLabel: result.emailStatusLabel,
-    emailReason: result.emailReason,
-    enriched: true,
-  };
-  if (result.bestEmail) patch.correo = result.bestEmail;
-  if (result.phoneDigits && (!current.whatsapp || current.telefono === "No disponible")) {
-    patch.whatsapp = result.phoneDigits;
-    patch.telefono = result.phoneDisplay || current.telefono;
-  }
-  if (result.techStack) patch.techStack = result.techStack;
-  if (typeof result.techSsl === "boolean") patch.techSsl = result.techSsl;
-  if (result.techServer !== undefined) patch.techServer = result.techServer;
-  if (result.webOpportunity) patch.webOpportunity = result.webOpportunity;
-  return patch;
-}
-
 export function ResultsTable() {
   const {
     prospects,
@@ -349,7 +269,6 @@ export function ResultsTable() {
     getServerProvidersSnapshot
   );
   const [busy, setBusy] = useState<Record<string, boolean>>({});
-  const [bulkLoading, setBulkLoading] = useState(false);
   const [emailLoading, setEmailLoading] = useState(false);
   const [validating, setValidating] = useState(false);
   const [exporting, setExporting] = useState<Filters["exporting"]>(null);
@@ -359,77 +278,6 @@ export function ResultsTable() {
   const allSelected = prospects.length > 0 && selectedIds.length === prospects.length;
   const exportTargets =
     selectedIds.length > 0 ? prospects.filter((p) => selectedSet.has(p.id)) : prospects;
-
-  const runEnrichment = useCallback(
-    async (targets: Prospect[]) => {
-      const list = targets.filter((p) => p.website);
-      if (list.length === 0) {
-        setNotice("Ninguno de los prospectos seleccionados tiene sitio web para re-escanear.");
-        return;
-      }
-      setNotice(null);
-      const ids = list.map((p) => p.id);
-      setBusy((prev) => {
-        const next = { ...prev };
-        for (const id of ids) next[id] = true;
-        return next;
-      });
-
-      const chunks: Prospect[][] = [];
-      const chunkSize = 8;
-      for (let i = 0; i < list.length; i += chunkSize) {
-        chunks.push(list.slice(i, i + chunkSize));
-      }
-
-      const responses = await mapLimit(chunks, 4, (chunk) => requestEnrichment(chunk));
-      const byId = new Map(list.map((prospect): [string, Prospect] => [prospect.id, prospect]));
-
-      const updates: Record<string, Partial<Prospect>> = {};
-      let enrichedCount = 0;
-      let failure: string | null = null;
-
-      for (const response of responses) {
-        if (!response.ok) {
-          failure = response.message ?? "No se pudo enriquecer.";
-          continue;
-        }
-        for (const result of response.results) {
-          const current = byId.get(result.id);
-          if (!current) continue;
-          updates[result.id] = buildPatch(current, result);
-          if (result.enriched) enrichedCount++;
-        }
-      }
-
-      if (Object.keys(updates).length > 0) updateProspects(updates);
-
-      setBusy((prev) => {
-        const next = { ...prev };
-        for (const id of ids) delete next[id];
-        return next;
-      });
-
-      if (failure) {
-        setNotice(failure);
-      } else if (enrichedCount > 0) {
-        setNotice(`Contactos enriquecidos: ${enrichedCount} de ${list.length}.`);
-      } else {
-        setNotice("No se encontraron datos nuevos en los sitios web analizados.");
-      }
-    },
-    [updateProspects]
-  );
-
-  async function enrichAll() {
-    const targets =
-      selectedIds.length > 0 ? prospects.filter((p) => selectedSet.has(p.id)) : prospects;
-    setBulkLoading(true);
-    try {
-      await runEnrichment(targets);
-    } finally {
-      setBulkLoading(false);
-    }
-  }
 
   const runEmailExtraction = useCallback(
     async (targets: Prospect[]) => {
@@ -508,7 +356,7 @@ export function ResultsTable() {
     [providerConfig, updateProspects]
   );
 
-  async function extractEmails() {
+  async function enrichProspects() {
     const targets =
       selectedIds.length > 0 ? prospects.filter((p) => selectedSet.has(p.id)) : prospects;
     setEmailLoading(true);
@@ -606,18 +454,13 @@ export function ResultsTable() {
     }
   }
 
-  async function handleReport(mode: "pdf" | "preview") {
+  async function handleDownloadReport() {
     if (exportTargets.length === 0 || exporting) return;
-    setExporting(mode);
+    setExporting("pdf");
     setNotice(null);
     try {
-      if (mode === "pdf") {
-        await downloadProspectReport(exportTargets);
-        setNotice(`Reporte PDF descargado (${exportTargets.length} prospecto(s)).`);
-      } else {
-        await previewProspectReport(exportTargets);
-        setNotice("Vista previa del reporte PDF abierta en una nueva pestaña.");
-      }
+      await downloadProspectReport(exportTargets);
+      setNotice(`Reporte PDF descargado (${exportTargets.length} prospecto(s)).`);
     } catch {
       setNotice("No se pudo generar el reporte PDF.");
     } finally {
@@ -629,16 +472,13 @@ export function ResultsTable() {
     <div className="overflow-hidden rounded-2xl border border-slate-800 bg-[#0f172a]">
       <ResultsToolbar
         exporting={exporting}
-        bulkLoading={bulkLoading}
         emailLoading={emailLoading}
         validating={validating}
         hasProspects={prospects.length > 0}
         selectedCount={selectedIds.length}
         onExportExcel={handleExportExcel}
-        onPreview={() => void handleReport("preview")}
-        onDownload={() => void handleReport("pdf")}
-        onEnrichAll={enrichAll}
-        onExtractEmails={extractEmails}
+        onDownload={handleDownloadReport}
+        onEnrichProspects={enrichProspects}
         onValidateEmails={validateEmailsList}
         onClearResults={handleClearResults}
       />
@@ -652,7 +492,7 @@ export function ResultsTable() {
         busy={busy}
         onSelectAll={selectAll}
         onToggle={toggleSelect}
-        onEnrich={(prospect) => void runEnrichment([prospect])}
+        onEnrich={(prospect) => void runEmailExtraction([prospect])}
         onValidate={(prospect) => void runValidation([prospect])}
       />
     </div>
@@ -661,30 +501,24 @@ export function ResultsTable() {
 
 function ResultsToolbar({
   exporting,
-  bulkLoading,
   emailLoading,
   validating,
   hasProspects,
   selectedCount,
   onExportExcel,
-  onPreview,
   onDownload,
-  onEnrichAll,
-  onExtractEmails,
+  onEnrichProspects,
   onValidateEmails,
   onClearResults,
 }: {
   exporting: Filters["exporting"];
-  bulkLoading: boolean;
   emailLoading: boolean;
   validating: boolean;
   hasProspects: boolean;
   selectedCount: number;
   onExportExcel: () => void;
-  onPreview: () => void;
   onDownload: () => void;
-  onEnrichAll: () => void;
-  onExtractEmails: () => void;
+  onEnrichProspects: () => void;
   onValidateEmails: () => void;
   onClearResults: () => void;
 }) {
@@ -707,16 +541,6 @@ function ResultsToolbar({
         </button>
         <button
           type="button"
-          onClick={onPreview}
-          disabled={Boolean(exporting) || !hasProspects}
-          title="Ver el reporte PDF en una nueva pestaña"
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 disabled:opacity-50"
-        >
-          {exporting === "preview" ? <Spinner /> : <IconEye />}
-          {exporting === "preview" ? "Generando…" : "Vista Previa PDF"}
-        </button>
-        <button
-          type="button"
           onClick={onDownload}
           disabled={Boolean(exporting) || !hasProspects}
           title="Descargar el reporte de prospección en PDF"
@@ -727,24 +551,14 @@ function ResultsToolbar({
         </button>
         <button
           type="button"
-          onClick={onEnrichAll}
-          disabled={bulkLoading}
-          className="rounded-lg border border-sky-600/50 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/20 disabled:opacity-50"
-        >
-          {bulkLoading
-            ? "Enriqueciendo…"
-            : `Enriquecer Contactos${selectedCount > 0 ? ` (${selectedCount})` : ""}`}
-        </button>
-        <button
-          type="button"
-          onClick={onExtractEmails}
+          onClick={onEnrichProspects}
           disabled={emailLoading || !hasProspects}
-          title="Escanea las URLs de la columna Sitio Web con Apify (o el extractor HTML local) para extraer y completar correos"
+          title="Escanea el sitio web de cada prospecto: extrae correos, detecta redes sociales, SSL y stack tecnológico en un solo clic"
           className="rounded-lg border border-amber-600/50 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/20 disabled:opacity-50"
         >
           {emailLoading
-            ? "Extrayendo correos…"
-            : `Enriquecer / Extraer Correos de Sitios Web${
+            ? "Enriqueciendo Prospectos…"
+            : `Enriquecer Prospectos (Extraer Correos y Tech)${
                 selectedCount > 0 ? ` (${selectedCount})` : ""
               }`}
         </button>
@@ -967,10 +781,14 @@ function ProspectRow({
               onEnrich(prospect);
             }}
             disabled={!prospect.website || busy}
-            title={prospect.website ? "Re-escanear el sitio web" : "Sin sitio web para analizar"}
+            title={
+              prospect.website
+                ? "Escanea el sitio web: correos, redes sociales, SSL y stack tecnológico"
+                : "Sin sitio web para analizar"
+            }
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {busy ? "Analizando…" : "Enriquecer Contactos"}
+            {busy ? "Analizando…" : "Enriquecer"}
           </button>
         </div>
       </td>
