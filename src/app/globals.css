@@ -28,7 +28,7 @@ body {
   background: rgba(56, 189, 248, 0.25);
 }
 
-dialog.settings-dialog::backdrop {
+dialog::backdrop {
   background-color: rgba(2, 6, 23, 0.7);
   backdrop-filter: blur(4px);
 }

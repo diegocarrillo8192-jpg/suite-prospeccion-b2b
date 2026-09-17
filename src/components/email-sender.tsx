@@ -4,9 +4,10 @@ import { useRef, useState } from "react";
 import { useAppState } from "./app-state";
 import { RecipientList } from "./recipient-list";
 import { TemplateEditor } from "./template-editor";
-import { SmtpSettings } from "./smtp-settings";
+import { SenderSettings } from "./sender-settings";
 import { SendModal } from "./send-monitor-modal";
 import { renderTemplate } from "@/lib/template";
+import { getMailerSnapshot } from "@/lib/mailer";
 import { formatDuration } from "@/lib/format";
 import type { Prospect, SendStatus } from "@/lib/types";
 
@@ -14,6 +15,7 @@ type Phase = "idle" | "confirm" | "sending" | "done";
 
 async function sendEmail(r: Prospect, subject: string, body: string): Promise<boolean> {
   try {
+    const mailer = getMailerSnapshot();
     const res = await fetch("/api/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -21,6 +23,10 @@ async function sendEmail(r: Prospect, subject: string, body: string): Promise<bo
         to: r.correo,
         subject: renderTemplate(subject, r),
         body: renderTemplate(body, r),
+        senderName: mailer.senderName,
+        senderEmail: mailer.senderEmail,
+        replyTo: mailer.replyTo || mailer.senderEmail,
+        mode: mailer.mode,
       }),
     });
     if (!res.ok) return false;
@@ -86,7 +92,7 @@ export function EmailSender() {
 
   return (
     <div className="space-y-6">
-      <div className="animate-fade-up rounded-2xl border border-slate-800 bg-[#0f172a] p-6">
+      <div className="animate-fade-up rounded-2xl border border-white/10 bg-white/[0.03] p-6 shadow-xl shadow-black/20 backdrop-blur-xl">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Emisor de Correos Masivos</h2>
@@ -97,7 +103,7 @@ export function EmailSender() {
           {total > 0 && (
             <button
               onClick={clearRecipients}
-              className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-400 transition hover:bg-slate-800 hover:text-slate-200"
+              className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-400 transition hover:bg-white/10 hover:text-slate-200"
             >
               Limpiar lista
             </button>
@@ -114,11 +120,11 @@ export function EmailSender() {
         </div>
         <div className="space-y-6">
           <AntiSpam delaySec={delaySec} onDelay={setDelaySec} />
-          <SmtpSettings />
+          <SenderSettings />
         </div>
       </div>
 
-      <div className="animate-fade-up flex items-center justify-between rounded-2xl border border-slate-800 bg-[#0f172a] p-6">
+      <div className="animate-fade-up flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] p-6 shadow-xl shadow-black/20 backdrop-blur-xl">
         <div className="text-sm text-slate-400">
           <p>
             {total} destinatario{total === 1 ? "" : "s"} listado{total === 1 ? "" : "s"}
@@ -128,7 +134,7 @@ export function EmailSender() {
         <button
           onClick={() => setPhase("confirm")}
           disabled={total === 0}
-          className="rounded-xl bg-emerald-500 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-400 disabled:opacity-50"
+          className="rounded-xl bg-emerald-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-400 disabled:opacity-50"
         >
           Enviar Correos
         </button>
@@ -151,7 +157,7 @@ export function EmailSender() {
 
 function AntiSpam({ delaySec, onDelay }: { delaySec: number; onDelay: (n: number) => void }) {
   return (
-    <div className="rounded-2xl border border-slate-800 bg-[#0f172a] p-6">
+    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 shadow-xl shadow-black/20 backdrop-blur-xl">
       <h3 className="text-sm font-semibold text-slate-100">Ajustes Anti-Spam</h3>
       <p className="mt-1 text-xs text-slate-500">
         Retraso entre envíos para evitar ser marcado como spam.

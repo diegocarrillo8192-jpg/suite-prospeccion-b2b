@@ -364,7 +364,11 @@ export async function enrichProspect(
       ? input.correo.trim().toLowerCase()
       : "";
 
-  const scan = website
+  const existingValidation: Promise<EmailValidation | null> = existingEmail
+    ? validateEmail(existingEmail)
+    : Promise.resolve(null);
+
+  const scan: SiteScan = website
     ? await scanWebsite(website, options)
     : { emails: [], phones: [], social: {}, pagesScanned: 0, tech: emptyTechStack() };
 
@@ -380,11 +384,12 @@ export async function enrichProspect(
   const ranked = rankEmails(allEmails, host);
   const bestEmail = pickBestEmail(ranked) || existingEmail;
 
-  const validation = bestEmail
-    ? await validateEmail(bestEmail)
-    : existingEmail
-      ? await validateEmail(existingEmail)
-      : null;
+  const validation =
+    bestEmail && bestEmail === existingEmail
+      ? await existingValidation
+      : bestEmail
+        ? await validateEmail(bestEmail)
+        : await existingValidation;
 
   const waDigits = social.whatsapp ? social.whatsapp.replace(/\D/g, "") : "";
   const phoneRaw = waDigits || scan.phones[0] || input.telefono || "";

@@ -40,8 +40,8 @@ export function SendModal({
     progress.total > 0 ? Math.round(((progress.sent + progress.failed) / progress.total) * 100) : 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="animate-pop-in w-full max-w-md rounded-2xl border border-slate-800 bg-[#0f172a] p-6 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+      <div className="animate-pop-in w-full max-w-md rounded-2xl border border-white/10 bg-slate-900/80 p-6 shadow-xl shadow-black/50 backdrop-blur-xl">
         {mode === "confirm" && (
           <>
             <h3 className="text-lg font-semibold text-slate-100">Confirmar envío</h3>
@@ -138,7 +138,7 @@ function Row({ label, value }: { label: string; value: string }) {
 
 function Stat({ label, value, color }: { label: string; value: number; color: string }) {
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/40 px-3 py-3">
+    <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 shadow-lg shadow-black/20">
       <p className={`text-2xl font-semibold ${color}`}>{value}</p>
       <p className="mt-0.5 text-xs text-slate-500">{label}</p>
     </div>

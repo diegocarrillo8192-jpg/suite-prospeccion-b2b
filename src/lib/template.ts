@@ -16,8 +16,8 @@ export function renderTemplate(template: string, p: Prospect): string {
   });
 }
 
-export const CHIPS: { key: string; label: string }[] = [
-  { key: "nombre", label: "{{nombre}}" },
-  { key: "empresa", label: "{{empresa}}" },
-  { key: "ciudad", label: "{{ciudad}}" },
+export const CHIPS: { token: string; label: string }[] = [
+  { token: "{{nombre}}", label: "Nombre" },
+  { token: "{{empresa}}", label: "Empresa" },
+  { token: "{{ciudad}}", label: "Ciudad" },
 ];

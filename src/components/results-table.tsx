@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { useAppState } from "./app-state";
 import { formatPhoneForWa, mapsUrl } from "@/lib/format";
 import { mapLimit } from "@/lib/concurrency";
@@ -274,10 +274,12 @@ export function ResultsTable() {
   const [exporting, setExporting] = useState<Filters["exporting"]>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const selectedSet = new Set(selectedIds);
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const allSelected = prospects.length > 0 && selectedIds.length === prospects.length;
-  const exportTargets =
-    selectedIds.length > 0 ? prospects.filter((p) => selectedSet.has(p.id)) : prospects;
+  const exportTargets = useMemo(
+    () => (selectedIds.length > 0 ? prospects.filter((p) => selectedSet.has(p.id)) : prospects),
+    [selectedIds.length, prospects, selectedSet]
+  );
 
   const runEmailExtraction = useCallback(
     async (targets: Prospect[]) => {
@@ -357,11 +359,9 @@ export function ResultsTable() {
   );
 
   async function enrichProspects() {
-    const targets =
-      selectedIds.length > 0 ? prospects.filter((p) => selectedSet.has(p.id)) : prospects;
     setEmailLoading(true);
     try {
-      await runEmailExtraction(targets);
+      await runEmailExtraction(exportTargets);
     } finally {
       setEmailLoading(false);
     }
@@ -419,11 +419,9 @@ export function ResultsTable() {
   );
 
   async function validateEmailsList() {
-    const targets =
-      selectedIds.length > 0 ? prospects.filter((p) => selectedSet.has(p.id)) : prospects;
     setValidating(true);
     try {
-      await runValidation(targets);
+      await runValidation(exportTargets);
     } finally {
       setValidating(false);
     }
@@ -469,7 +467,7 @@ export function ResultsTable() {
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-800 bg-[#0f172a]">
+    <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] shadow-xl shadow-black/20 backdrop-blur-xl">
       <ResultsToolbar
         exporting={exporting}
         emailLoading={emailLoading}
@@ -523,7 +521,7 @@ function ResultsToolbar({
   onClearResults: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
       <p className="text-xs text-slate-500">
         Enriquecimiento profundo con validación MX/DNS, redes sociales, detector de stack web y
         oportunidad para agencia.
@@ -591,7 +589,7 @@ function ResultsToolbar({
 
 function NoticeBar({ notice }: { notice: string }) {
   return (
-    <div className="border-b border-slate-800 bg-slate-900/50 px-4 py-2 text-xs text-slate-400">
+    <div className="border-b border-white/10 bg-slate-900/50 px-4 py-2 text-xs text-slate-400">
       {notice}
     </div>
   );
@@ -620,7 +618,7 @@ function ProspectsTable({
     <div className="overflow-x-auto">
       <table className="w-full min-w-[1560px] border-collapse text-left text-sm">
         <thead>
-          <tr className="border-b border-slate-800 text-xs uppercase tracking-wide text-slate-500">
+          <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-slate-500">
             <th className="w-10 px-4 py-3">
               <input
                 type="checkbox"
@@ -679,8 +677,8 @@ function ProspectRow({
   return (
     <tr
       onClick={() => onToggle(prospect.id)}
-      className={`cursor-pointer border-b border-slate-800/60 transition-colors ${
-        selected ? "bg-sky-500/5" : "hover:bg-slate-800/40"
+      className={`cursor-pointer border-b border-white/5 transition-colors ${
+        selected ? "bg-sky-500/5" : "hover:bg-white/5"
       }`}
     >
       <td className="px-4 py-3">

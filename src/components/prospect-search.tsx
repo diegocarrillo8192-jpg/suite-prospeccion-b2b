@@ -253,7 +253,7 @@ function SearchForm({
   return (
     <form
       onSubmit={onSubmit}
-      className="animate-fade-up rounded-2xl border border-slate-800 bg-[#0f172a] p-6"
+      className="animate-fade-up rounded-2xl border border-white/10 bg-white/[0.03] p-6 shadow-xl shadow-black/20 backdrop-blur-xl"
     >
       <h2 className="text-lg font-semibold text-slate-100">Buscador de Prospectos</h2>
       <p className="mt-1 text-sm text-slate-400">
@@ -370,7 +370,7 @@ function SkippedNotice({ count }: { count: number }) {
 
 function EmptyState() {
   return (
-    <div className="rounded-2xl border border-slate-800 bg-[#0f172a] p-10 text-center text-slate-400">
+    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-10 text-center text-slate-400 shadow-xl shadow-black/20 backdrop-blur-xl">
       No se encontraron resultados nuevos.
     </div>
   );
@@ -449,7 +449,7 @@ function Field({
 
 function SkeletonTable() {
   return (
-    <div className="animate-fade-in overflow-hidden rounded-2xl border border-slate-800 bg-[#0f172a]">
+    <div className="animate-fade-in overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] shadow-xl shadow-black/20 backdrop-blur-xl">
       <div className="space-y-3 p-6">
         {Array.from({ length: 6 }).map((_, i) => (
           <div
