@@ -15,6 +15,14 @@ import {
 } from "@/lib/duplicates";
 import type { ExtractionMeta } from "@/lib/extract";
 import type { Prospect } from "@/lib/types";
+import {
+  getProvidersSnapshot,
+  getServerProvidersSnapshot,
+  hasEngineKey,
+  saveProviderConfig,
+  subscribeProviders,
+  type EngineId,
+} from "@/lib/providers";
 
 const LIMITS = [10, 25, 50, 100];
 
@@ -22,11 +30,21 @@ type SearchOutcome =
   | { ok: true; prospects: Prospect[]; meta?: ExtractionMeta }
   | { ok: false; message: string };
 
-async function requestProspects(niche: string, city: string, limit: number): Promise<SearchOutcome> {
+interface SearchRequest {
+  niche: string;
+  city: string;
+  limit: number;
+  engine: EngineId;
+  apifyToken: string;
+  apifyActor: string;
+  googleKey: string;
+}
+
+async function requestProspects(params: SearchRequest): Promise<SearchOutcome> {
   const res = await fetch("/api/prospect", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ niche, city, limit }),
+    body: JSON.stringify(params),
   });
   const data = await res.json();
   if (!res.ok || data?.success !== true) {
@@ -35,8 +53,27 @@ async function requestProspects(niche: string, city: string, limit: number): Pro
   return { ok: true, prospects: data.prospects ?? [], meta: data.meta };
 }
 
+function engineHint(engine: EngineId, apifyReady: boolean, googleReady: boolean): string {
+  if (engine === "apify") {
+    return apifyReady
+      ? "Usará tu actor de Google Maps en la nube de Apify."
+      : "Añade tu API Key de Apify para usar este motor.";
+  }
+  if (engine === "google") {
+    return googleReady
+      ? "Usará la API oficial de Google Places (requiere facturación activa)."
+      : "Añade tu API Key de Google Cloud para usar este motor.";
+  }
+  return "Web scraping directo en Bing y DuckDuckGo. Sin API Key.";
+}
+
 function useProspectSearch() {
   const { prospects, setProspects, selectedIds, transferSelected, clearSelection } = useAppState();
+  const providerConfig = useSyncExternalStore(
+    subscribeProviders,
+    getProvidersSnapshot,
+    getServerProvidersSnapshot
+  );
   const [niche, setNiche] = useState("");
   const [city, setCity] = useState("");
   const [limit, setLimit] = useState(25);
@@ -47,12 +84,25 @@ function useProspectSearch() {
   const [meta, setMeta] = useState<ExtractionMeta | null>(null);
   const historyCount = useSyncExternalStore(subscribeHistory, getHistoryCount, getServerHistoryCount);
 
+  const engine = providerConfig.engine;
+  const apifyReady = providerConfig.apifyToken.trim().length > 0;
+  const googleReady = providerConfig.googleKey.trim().length > 0;
+
+  function setEngine(next: EngineId) {
+    saveProviderConfig({ ...providerConfig, engine: next });
+  }
+
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const n = sanitizeText(niche);
     const c = sanitizeText(city);
     if (!c) {
       setError("Indica una ubicación / ciudad para buscar.");
+      setSearched(true);
+      return;
+    }
+    if (!hasEngineKey(providerConfig, engine)) {
+      setError("Configura la API Key del motor seleccionado en Configuración de Proveedores.");
       setSearched(true);
       return;
     }
@@ -64,7 +114,15 @@ function useProspectSearch() {
     clearSelection();
 
     try {
-      const result = await requestProspects(n, c, limit);
+      const result = await requestProspects({
+        niche: n,
+        city: c,
+        limit,
+        engine,
+        apifyToken: providerConfig.apifyToken,
+        apifyActor: providerConfig.apifyActor,
+        googleKey: providerConfig.googleKey,
+      });
       if (!result.ok) {
         setProspects([]);
         setSkippedCount(0);
@@ -102,12 +160,16 @@ function useProspectSearch() {
     skippedCount,
     meta,
     historyCount,
+    engine,
+    apifyReady,
+    googleReady,
+    setEngine,
     onSubmit,
     onClearHistory: clearHistory,
   };
 }
 
-export function ProspectSearch() {
+export function ProspectSearch({ onOpenSettings }: { onOpenSettings: () => void }) {
   const s = useProspectSearch();
   const showError = Boolean(s.error) && !s.loading;
   const showSkipped = s.skippedCount > 0 && !s.loading;
@@ -120,13 +182,18 @@ export function ProspectSearch() {
         niche={s.niche}
         city={s.city}
         limit={s.limit}
+        engine={s.engine}
+        apifyReady={s.apifyReady}
+        googleReady={s.googleReady}
         loading={s.loading}
         historyCount={s.historyCount}
         onNiche={s.setNiche}
         onCity={s.setCity}
         onLimit={s.setLimit}
+        onEngine={s.setEngine}
         onSubmit={s.onSubmit}
         onClearHistory={s.onClearHistory}
+        onOpenSettings={onOpenSettings}
       />
 
       {s.loading && <SkeletonTable />}
@@ -154,24 +221,34 @@ function SearchForm({
   niche,
   city,
   limit,
+  engine,
+  apifyReady,
+  googleReady,
   loading,
   historyCount,
   onNiche,
   onCity,
   onLimit,
+  onEngine,
   onSubmit,
   onClearHistory,
+  onOpenSettings,
 }: {
   niche: string;
   city: string;
   limit: number;
+  engine: EngineId;
+  apifyReady: boolean;
+  googleReady: boolean;
   loading: boolean;
   historyCount: number;
   onNiche: (v: string) => void;
   onCity: (v: string) => void;
   onLimit: (n: number) => void;
+  onEngine: (e: EngineId) => void;
   onSubmit: (e: FormEvent<HTMLFormElement>) => void;
   onClearHistory: () => void;
+  onOpenSettings: () => void;
 }) {
   return (
     <form
@@ -183,7 +260,7 @@ function SearchForm({
         Extracción real de empresas según nicho y ubicación (cualquier país).
       </p>
 
-      <div className="mt-5 grid gap-4 sm:grid-cols-[1fr_1fr_auto_auto]">
+      <div className="mt-5 grid gap-4 sm:grid-cols-2">
         <Field
           label="Nicho / Rubro"
           value={niche}
@@ -196,29 +273,63 @@ function SearchForm({
           onChange={onCity}
           placeholder="Ej: Panamá, Bogotá, CDMX, Miami…"
         />
-        <div className="flex items-end gap-3">
-          <label className="block">
-            <span className="mb-1.5 block text-xs font-medium text-slate-400">Cantidad</span>
-            <select
-              value={limit}
-              onChange={(e) => onLimit(Number(e.target.value))}
-              className="w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3.5 py-2.5 text-sm text-slate-100 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
-            >
-              {LIMITS.map((l) => (
-                <option key={l} value={l}>
-                  {l} prospectos
-                </option>
-              ))}
-            </select>
-          </label>
+      </div>
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-[1fr_auto_auto]">
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-medium text-slate-400">
+            Motor de extracción
+          </span>
+          <select
+            value={engine}
+            onChange={(e) => onEngine(e.target.value as EngineId)}
+            className="w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3.5 py-2.5 text-sm text-slate-100 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
+          >
+            <option value="free">Gratuito (Scraper Local)</option>
+            <option value="apify">
+              Apify Cloud API (Rápido y Masivo){apifyReady ? "" : " — sin API Key"}
+            </option>
+            <option value="google">
+              Google Places Official API{googleReady ? "" : " — sin API Key"}
+            </option>
+          </select>
+        </label>
+
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-medium text-slate-400">Cantidad</span>
+          <select
+            value={limit}
+            onChange={(e) => onLimit(Number(e.target.value))}
+            className="w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3.5 py-2.5 text-sm text-slate-100 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
+          >
+            {LIMITS.map((l) => (
+              <option key={l} value={l}>
+                {l} prospectos
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="flex items-end">
           <button
             type="submit"
             disabled={loading}
-            className="rounded-xl bg-sky-500 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-400 disabled:opacity-60"
+            className="h-[42px] rounded-xl bg-sky-500 px-6 text-sm font-semibold text-white transition hover:bg-sky-400 disabled:opacity-60"
           >
             {loading ? "Buscando…" : "Buscar Prospectos"}
           </button>
         </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-slate-500">{engineHint(engine, apifyReady, googleReady)}</p>
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:bg-slate-800 hover:text-slate-100"
+        >
+          Configurar Proveedores / APIs
+        </button>
       </div>
 
       {historyCount > 0 && (

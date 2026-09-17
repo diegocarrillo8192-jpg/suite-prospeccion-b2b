@@ -9,7 +9,7 @@ const TABS: { id: TabId; label: string; short: string }[] = [
   { id: "sender", label: "Emisor de Correos", short: "Emisor" },
 ];
 
-export function Header() {
+export function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
   const { tab, setTab } = useAppState();
 
   return (
@@ -22,9 +22,39 @@ export function Header() {
             <p className="hidden text-xs text-slate-500 sm:block">Leads &amp; Email</p>
           </div>
         </div>
-        <SegmentedTabs value={tab} onChange={setTab} />
+        <div className="flex items-center gap-2 sm:gap-3">
+          <SegmentedTabs value={tab} onChange={setTab} />
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            title="Configuración de Proveedores / APIs"
+            aria-label="Configuración de Proveedores / APIs"
+            className="rounded-full border border-slate-800 bg-slate-900/60 p-2 text-slate-400 transition hover:bg-slate-800 hover:text-slate-200"
+          >
+            <GearIcon />
+          </button>
+        </div>
       </div>
     </header>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+    </svg>
   );
 }
 

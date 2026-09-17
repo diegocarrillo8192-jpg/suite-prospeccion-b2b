@@ -13,7 +13,7 @@ export interface ExtractionMeta {
   cityName: string;
 }
 
-interface GeoLocation {
+export interface GeoLocation {
   countryCode: string;
   countryName: string;
   cityName: string;
@@ -263,7 +263,7 @@ async function fetchJson(url: string, headers: Record<string, string>): Promise<
   return res.json();
 }
 
-async function geocodeCity(city: string): Promise<GeoLocation | null> {
+export async function geocodeCity(city: string): Promise<GeoLocation | null> {
   try {
     const url = `${NOMINATIM_BASE}/search?format=jsonv2&limit=1&addressdetails=1&accept-language=es&q=${encodeURIComponent(city)}`;
     const data = (await fetchJson(url, { "User-Agent": USER_AGENT, "Accept-Language": "es" })) as NominatimResult[];
