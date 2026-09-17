@@ -1,5 +1,6 @@
-import type { Prospect } from "./types";
+import type { EmailValidation, Prospect, SocialLinks } from "./types";
 import { callingCodeFor, countryNameFor } from "./country-codes";
+import { enrichProspect } from "./enricher";
 
 const NOMINATIM_BASE = "https://nominatim.openstreetmap.org";
 const USER_AGENT = "SuiteProspeccionB2B/1.0 (contacto: diegocarrillo8192@gmail.com)";
@@ -33,6 +34,9 @@ interface RawBusiness {
   countryCode: string;
   email: string;
   phone: string;
+  emails: string[];
+  social: SocialLinks;
+  validation: EmailValidation | null;
 }
 
 interface NominatimResult {
@@ -63,10 +67,6 @@ function hashString(s: string): string {
     h = Math.imul(h, 16777619);
   }
   return (h >>> 0).toString(36);
-}
-
-function cleanDigits(v: string): string {
-  return (v ?? "").replace(/\D/g, "");
 }
 
 function normKey(v: string): string {
@@ -186,75 +186,6 @@ function decodeSearchUrl(href: string): string {
   }
 
   return h;
-}
-
-const IMAGE_EXT = /\.(png|jpe?g|gif|svg|webp|ico|avif)([?#].*)?$/i;
-const BAD_EMAIL_HINTS = /(example|domain|yourname|youremail|sentry|wixpress|email\.com|no-?reply@)/i;
-
-function findEmails(html: string): string[] {
-  const decoded = html
-    .replace(/&#x40;|&#64;|%40/gi, "@")
-    .replace(/&#46;/gi, ".")
-    .replace(/&amp;/gi, "&");
-  const re = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi;
-  const found: string[] = [];
-  const seen = new Set<string>();
-  for (const m of decoded.match(re) ?? []) {
-    const e = m.toLowerCase();
-    if (IMAGE_EXT.test(e)) continue;
-    if (BAD_EMAIL_HINTS.test(e)) continue;
-    if (e.length > 120) continue;
-    if (seen.has(e)) continue;
-    seen.add(e);
-    found.push(e);
-  }
-  return found;
-}
-
-function pickBestEmail(emails: string[]): string {
-  if (emails.length === 0) return "";
-  const preferred = ["contacto", "contact", "info", "ventas", "hola", "admin", "hello"];
-  for (const p of preferred) {
-    const hit = emails.find((e) => e.startsWith(p));
-    if (hit) return hit;
-  }
-  return emails[0];
-}
-
-function findPhone(html: string): string {
-  const telLinks: string[] = [];
-  const telRe = /(?:href|content)=["']?tel:([+\d][\d\s().-]{5,}[\d])/gi;
-  for (const m of html.matchAll(telRe)) telLinks.push(m[1]);
-  const generic: string[] = [];
-  const genRe = /(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?){2,}\d{2,}/g;
-  for (const m of html.match(genRe) ?? []) generic.push(m);
-
-  for (const cand of [...telLinks, ...generic]) {
-    const d = cleanDigits(cand);
-    if (d.length >= 7 && d.length <= 13) return d;
-  }
-  return "";
-}
-
-async function scrapeContact(url: string): Promise<{ email: string; phone: string }> {
-  try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": BROWSER_UA,
-        Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "es",
-      },
-      redirect: "follow",
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) return { email: "", phone: "" };
-    const ct = res.headers.get("content-type") ?? "";
-    if (!ct.includes("html") && !ct.includes("text")) return { email: "", phone: "" };
-    const html = (await res.text()).slice(0, 1_000_000);
-    return { email: pickBestEmail(findEmails(html)), phone: findPhone(html) };
-  } catch {
-    return { email: "", phone: "" };
-  }
 }
 
 async function fetchJson(url: string, headers: Record<string, string>): Promise<unknown> {
@@ -441,22 +372,21 @@ export async function extractProspects(
 
   const results = dedupResults(interleave(bingResults, ddgResults)).slice(0, limit);
 
-  const enriched = await mapConcurrency(results, 8, async (r) => {
-    let email = "";
-    let phone = "";
-    if (r.url) {
-      const scraped = await scrapeContact(r.url);
-      email = scraped.email;
-      phone = scraped.phone;
-    }
+  const maxPages = limit > 50 ? 2 : 4;
+
+  const enriched = await mapConcurrency(results, 6, async (r) => {
+    const detail = await enrichProspect({ website: r.url, countryCode }, { maxPages });
     const raw: RawBusiness = {
       name: r.title,
       website: r.url,
       snippet: r.snippet,
       city: cityName,
       countryCode,
-      email,
-      phone,
+      email: detail.bestEmail,
+      phone: detail.phoneDigits,
+      emails: detail.emails,
+      social: detail.social,
+      validation: detail.validation,
     };
     return raw;
   });
@@ -475,6 +405,12 @@ export async function extractProspects(
       website: b.website,
       ciudad: cityName,
       rubro: niche.trim() || "negocios",
+      emails: b.emails.length ? b.emails : undefined,
+      social: Object.keys(b.social).length ? b.social : undefined,
+      emailStatus: b.validation?.status ?? "unknown",
+      emailStatusLabel: b.validation?.label ?? "Sin verificar",
+      emailReason: b.validation?.reason ?? "",
+      enriched: b.emails.length > 0 || Boolean(b.validation),
     };
   });
 

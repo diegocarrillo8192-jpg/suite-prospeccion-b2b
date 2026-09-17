@@ -1,3 +1,26 @@
+export type SocialPlatform =
+  | "instagram"
+  | "linkedin"
+  | "facebook"
+  | "whatsapp"
+  | "youtube"
+  | "tiktok";
+
+export type SocialLinks = Partial<Record<SocialPlatform, string>>;
+
+export type EmailValidationStatus = "valid" | "risky" | "invalid" | "unknown";
+
+export interface EmailValidation {
+  email: string;
+  domain: string;
+  status: EmailValidationStatus;
+  label: string;
+  reason: string;
+  hasMx: boolean;
+  disposable: boolean;
+  mxRecords: string[];
+}
+
 export interface Prospect {
   id: string;
   nombre: string;
@@ -9,6 +32,12 @@ export interface Prospect {
   website: string;
   ciudad: string;
   rubro: string;
+  emails?: string[];
+  social?: SocialLinks;
+  emailStatus?: EmailValidationStatus;
+  emailStatusLabel?: string;
+  emailReason?: string;
+  enriched?: boolean;
 }
 
 export type TabId = "search" | "sender";

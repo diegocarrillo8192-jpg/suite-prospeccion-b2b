@@ -8,6 +8,7 @@ interface AppState {
   setTab: (t: TabId) => void;
   prospects: Prospect[];
   setProspects: (p: Prospect[]) => void;
+  updateProspects: (updates: Record<string, Partial<Prospect>>) => void;
   selectedIds: string[];
   toggleSelect: (id: string) => void;
   selectAll: () => void;
@@ -26,6 +27,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [recipients, setRecipients] = useState<Prospect[]>([]);
+
+  const updateProspects = useCallback((updates: Record<string, Partial<Prospect>>) => {
+    setProspects((list) =>
+      list.map((p) => (updates[p.id] ? { ...p, ...updates[p.id] } : p))
+    );
+  }, []);
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
@@ -68,6 +75,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       setTab,
       prospects,
       setProspects,
+      updateProspects,
       selectedIds,
       toggleSelect,
       selectAll,
@@ -81,6 +89,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     [
       tab,
       prospects,
+      updateProspects,
       selectedIds,
       recipients,
       toggleSelect,
