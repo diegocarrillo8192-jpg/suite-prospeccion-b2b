@@ -3,6 +3,8 @@
 import { useCallback, useState } from "react";
 import { useAppState } from "./app-state";
 import { formatPhoneForWa, mapsUrl } from "@/lib/format";
+import { exportProspectsToExcel } from "@/lib/export-excel";
+import { downloadProspectReport, previewProspectReport } from "@/lib/export-pdf";
 import { SocialBadges } from "./social-icons";
 import type { EmailValidationStatus, Prospect } from "@/lib/types";
 import type {
@@ -68,6 +70,36 @@ function TechBadges({ tech, ssl }: { tech?: DetectedTech[]; ssl?: boolean }) {
         </span>
       ))}
     </div>
+  );
+}
+
+function IconExcel() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+      <path d="M14 3v5h5" />
+      <path d="m9.5 12 5 5m0-5-5 5" />
+    </svg>
+  );
+}
+
+function IconPdf() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+      <path d="M14 3v5h5" />
+      <path d="M8.5 13h1.2a1.3 1.3 0 0 1 0 2.6H8.5V13zm0 2.6V18" />
+      <path d="M13 13h1a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2h-1z" />
+    </svg>
+  );
+}
+
+function IconEye() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
   );
 }
 
@@ -155,6 +187,7 @@ export function ResultsTable() {
   const { prospects, selectedIds, toggleSelect, selectAll, updateProspects } = useAppState();
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [exporting, setExporting] = useState<null | "excel" | "pdf" | "preview">(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const selectedSet = new Set(selectedIds);
@@ -224,6 +257,42 @@ export function ResultsTable() {
     }
   }
 
+  const exportTargets =
+    selectedIds.length > 0 ? prospects.filter((p) => selectedSet.has(p.id)) : prospects;
+
+  async function handleExportExcel() {
+    if (exportTargets.length === 0 || exporting) return;
+    setExporting("excel");
+    setNotice(null);
+    try {
+      await exportProspectsToExcel(exportTargets);
+      setNotice(`Excel exportado con ${exportTargets.length} prospecto(s).`);
+    } catch {
+      setNotice("No se pudo generar el archivo Excel.");
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  async function handleReport(mode: "pdf" | "preview") {
+    if (exportTargets.length === 0 || exporting) return;
+    setExporting(mode);
+    setNotice(null);
+    try {
+      if (mode === "pdf") {
+        await downloadProspectReport(exportTargets);
+        setNotice(`Reporte PDF descargado (${exportTargets.length} prospecto(s)).`);
+      } else {
+        await previewProspectReport(exportTargets);
+        setNotice("Vista previa del reporte PDF abierta en una nueva pestaña.");
+      }
+    } catch {
+      setNotice("No se pudo generar el reporte PDF.");
+    } finally {
+      setExporting(null);
+    }
+  }
+
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-800 bg-[#0f172a]">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
@@ -231,16 +300,48 @@ export function ResultsTable() {
           Enriquecimiento profundo con validación MX/DNS, redes sociales, detector de stack web y
           oportunidad para agencia.
         </p>
-        <button
-          type="button"
-          onClick={enrichAll}
-          disabled={bulkLoading}
-          className="rounded-lg border border-sky-600/50 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/20 disabled:opacity-50"
-        >
-          {bulkLoading
-            ? "Enriqueciendo…"
-            : `Enriquecer Contactos${selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}`}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={Boolean(exporting) || prospects.length === 0}
+            title="Exportar los prospectos seleccionados (o todos) a Excel .xlsx"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600/50 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20 disabled:opacity-50"
+          >
+            <IconExcel />
+            {exporting === "excel" ? "Generando…" : "Exportar a Excel (.xlsx)"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleReport("preview")}
+            disabled={Boolean(exporting) || prospects.length === 0}
+            title="Ver el reporte PDF en una nueva pestaña"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 disabled:opacity-50"
+          >
+            <IconEye />
+            {exporting === "preview" ? "Generando…" : "Vista Previa PDF"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleReport("pdf")}
+            disabled={Boolean(exporting) || prospects.length === 0}
+            title="Descargar el reporte de prospección en PDF"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-rose-600/50 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-50"
+          >
+            <IconPdf />
+            {exporting === "pdf" ? "Generando…" : "Descargar Reporte PDF"}
+          </button>
+          <button
+            type="button"
+            onClick={enrichAll}
+            disabled={bulkLoading}
+            className="rounded-lg border border-sky-600/50 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/20 disabled:opacity-50"
+          >
+            {bulkLoading
+              ? "Enriqueciendo…"
+              : `Enriquecer Contactos${selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}`}
+          </button>
+        </div>
       </div>
 
       {notice && (
