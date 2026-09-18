@@ -3,8 +3,6 @@
 import { useRef, useSyncExternalStore } from "react";
 import { CHIPS, renderTemplate } from "@/lib/template";
 import {
-  SENDER_EMAIL_PLACEHOLDER,
-  SENDER_NAME_PLACEHOLDER,
   getMailerSnapshot,
   getServerMailerSnapshot,
   subscribeMailer,
@@ -17,6 +15,9 @@ interface Props {
   body: string;
   onBody: (s: string) => void;
 }
+
+const DEFAULT_SENDER_NAME = "Nombre de Remitente";
+const DEFAULT_SENDER_EMAIL = "correo@tudominio.com";
 
 const SAMPLE: Prospect = {
   id: "sample",
@@ -39,8 +40,8 @@ export function TemplateEditor({ subject, onSubject, body, onBody }: Props) {
     getServerMailerSnapshot
   );
 
-  const fromName = mailer.senderName.trim() || SENDER_NAME_PLACEHOLDER;
-  const fromEmail = mailer.senderEmail.trim() || SENDER_EMAIL_PLACEHOLDER;
+  const fromName = mailer.senderName.trim() || DEFAULT_SENDER_NAME;
+  const fromEmail = mailer.senderEmail.trim() || DEFAULT_SENDER_EMAIL;
 
   function insertChip(token: string, target: "subject" | "body") {
     if (target === "subject") {
