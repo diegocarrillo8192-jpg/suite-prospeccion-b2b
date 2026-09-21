@@ -36,35 +36,72 @@ export function downloadCsv(prospects: Prospect[], filename = "prospectos.csv"):
   URL.revokeObjectURL(url);
 }
 
+function normalizeHeader(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 export function parseCsv(text: string): Partial<Prospect>[] {
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
   if (lines.length < 2) return [];
 
-  const headers = parseLine(lines[0]).map((h) => h.trim().toLowerCase());
+  const headers = parseLine(lines[0]).map(normalizeHeader);
   const idx = (names: string[]) => {
     for (const n of names) {
-      const i = headers.indexOf(n);
-      if (i >= 0) return i;
+      const target = normalizeHeader(n);
+      const exact = headers.indexOf(target);
+      if (exact >= 0) return exact;
+    }
+    for (const n of names) {
+      const target = normalizeHeader(n);
+      if (!target) continue;
+      const partial = headers.findIndex(
+        (h) => h.length > 0 && (h.includes(target) || target.includes(h))
+      );
+      if (partial >= 0) return partial;
     }
     return -1;
   };
-  const get = (row: string[], names: string[]) => {
-    const i = idx(names);
-    return i >= 0 ? (row[i] ?? "").trim() : "";
+
+  const cols = {
+    nombre: idx(["nombre", "nombres", "name", "full name", "nombre completo", "contacto", "contact"]),
+    empresa: idx([
+      "empresa",
+      "company",
+      "company name",
+      "organizacion",
+      "organization",
+      "razon social",
+      "negocio",
+      "business",
+    ]),
+    correo: idx(["correo", "email", "e mail", "mail", "correo electronico", "email address"]),
+    telefono: idx(["telefono", "phone", "telephone", "tel", "celular", "movil", "mobile"]),
+    whatsapp: idx(["whatsapp", "wa", "whatsapp number", "wsp"]),
+    direccion: idx(["direccion", "address", "domicilio", "calle"]),
+    website: idx(["website", "web", "sitio web", "url", "sitio", "pagina web"]),
+    ciudad: idx(["ciudad", "city", "localidad", "ubicacion", "location", "town"]),
+    rubro: idx(["rubro", "nicho", "industry", "sector", "categoria", "giro", "activity"]),
   };
+  const get = (row: string[], i: number) => (i >= 0 ? (row[i] ?? "").trim() : "");
 
   return lines.slice(1).map((line) => {
     const row = parseLine(line);
     return {
-      nombre: get(row, ["nombre", "name", "contacto"]),
-      empresa: get(row, ["empresa", "company", "organizacion", "organización"]),
-      correo: get(row, ["correo", "email", "mail", "e-mail"]),
-      telefono: get(row, ["telefono", "teléfono", "phone", "telephone"]),
-      whatsapp: get(row, ["whatsapp", "wa", "whatsapp number"]),
-      direccion: get(row, ["direccion", "dirección", "address"]),
-      website: get(row, ["website", "web", "sitio web", "url"]),
-      ciudad: get(row, ["ciudad", "city", "ubicacion", "ubicación"]),
-      rubro: get(row, ["rubro", "nicho", "industry", "sector"]),
+      nombre: get(row, cols.nombre),
+      empresa: get(row, cols.empresa),
+      correo: get(row, cols.correo),
+      telefono: get(row, cols.telefono),
+      whatsapp: get(row, cols.whatsapp),
+      direccion: get(row, cols.direccion),
+      website: get(row, cols.website),
+      ciudad: get(row, cols.ciudad),
+      rubro: get(row, cols.rubro),
     };
   });
 }

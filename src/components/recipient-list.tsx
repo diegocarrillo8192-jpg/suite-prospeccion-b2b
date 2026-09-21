@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type ChangeEvent } from "react";
+import { useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { useAppState } from "./app-state";
 import { parseCsv } from "@/lib/csv";
 import { isValidEmail } from "@/lib/sanitize";
@@ -10,11 +10,10 @@ export function RecipientList() {
   const { recipients, addRecipients, removeRecipient } = useAppState();
   const fileRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
 
-  function onFile(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  function loadFile(file: File) {
     const reader = new FileReader();
     reader.onload = () => {
       try {
@@ -36,25 +35,56 @@ export function RecipientList() {
 
         if (prospects.length === 0) {
           setError("No se encontraron correos válidos en el archivo.");
+          setNotice(null);
         } else {
           addRecipients(prospects);
           setError(null);
+          setNotice(
+            `${prospects.length} contacto${prospects.length === 1 ? "" : "s"} importado${
+              prospects.length === 1 ? "" : "s"
+            } automáticamente desde ${file.name}.`
+          );
         }
       } catch {
         setError("No se pudo procesar el archivo CSV.");
+        setNotice(null);
       }
     };
     reader.readAsText(file);
+  }
+
+  function onFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) loadFile(file);
     e.target.value = "";
+  }
+
+  function onDrop(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) loadFile(file);
   }
 
   return (
     <div>
       {recipients.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-700 py-10 text-center">
-          <p className="text-sm text-slate-400">Aún no hay destinatarios.</p>
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={onDrop}
+          className={`flex flex-col items-center justify-center rounded-xl border border-dashed py-10 text-center transition ${
+            dragging ? "border-emerald-500 bg-emerald-500/5" : "border-slate-700"
+          }`}
+        >
+          <p className="text-sm text-slate-400">
+            Arrastra tu CSV aquí o selecciónalo manualmente.
+          </p>
           <p className="mt-1 text-xs text-slate-600">
-            Transfiere prospectos desde el buscador o carga un CSV.
+            Detectamos automáticamente nombre, empresa, correo y ciudad.
           </p>
           <button
             onClick={() => fileRef.current?.click()}
@@ -111,6 +141,7 @@ export function RecipientList() {
         onChange={onFile}
         className="hidden"
       />
+      {notice && <p className="mt-3 text-xs text-emerald-400">{notice}</p>}
       {error && <p className="mt-3 text-xs text-rose-400">{error}</p>}
     </div>
   );

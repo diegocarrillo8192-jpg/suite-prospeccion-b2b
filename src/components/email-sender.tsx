@@ -1,28 +1,38 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import { useAppState } from "./app-state";
 import { RecipientList } from "./recipient-list";
 import { TemplateEditor } from "./template-editor";
 import { SenderSettings } from "./sender-settings";
 import { SendModal } from "./send-monitor-modal";
-import { renderTemplate } from "@/lib/template";
-import { getMailerSnapshot } from "@/lib/mailer";
+import { Modal } from "./modal";
+import { renderTemplate, senderExtras } from "@/lib/template";
+import { EMAIL_TEMPLATES } from "@/lib/email-templates";
+import {
+  getMailerSnapshot,
+  getServerMailerSnapshot,
+  isMailerConfigured,
+  subscribeMailer,
+} from "@/lib/mailer";
 import { formatDuration } from "@/lib/format";
 import type { Prospect, SendStatus } from "@/lib/types";
 
 type Phase = "idle" | "confirm" | "sending" | "done";
 
+const DEFAULT_TEMPLATE = EMAIL_TEMPLATES[0];
+
 async function sendEmail(r: Prospect, subject: string, body: string): Promise<boolean> {
   try {
     const mailer = getMailerSnapshot();
+    const extras = senderExtras(mailer);
     const res = await fetch("/api/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         to: r.correo,
-        subject: renderTemplate(subject, r),
-        body: renderTemplate(body, r),
+        subject: renderTemplate(subject, r, extras),
+        body: renderTemplate(body, r, extras),
         senderName: mailer.senderName,
         senderEmail: mailer.senderEmail,
         replyTo: mailer.replyTo || mailer.senderEmail,
@@ -43,11 +53,10 @@ function sleep(ms: number): Promise<void> {
 
 export function EmailSender() {
   const { recipients, clearRecipients } = useAppState();
-  const [subject, setSubject] = useState("Propuesta de colaboración para {{empresa}}");
-  const [body, setBody] = useState(
-    "Hola {{nombre}},\n\nMe presento desde la Suite de Prospección. Nos gustaría conversar sobre cómo podemos ayudar a {{empresa}} en {{ciudad}}.\n\nSaludos cordiales."
-  );
-  const [delaySec, setDelaySec] = useState(4);
+  const [subject, setSubject] = useState(DEFAULT_TEMPLATE.subject);
+  const [body, setBody] = useState(DEFAULT_TEMPLATE.html);
+  const [delaySec, setDelaySec] = useState(3);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState<SendStatus>({
     total: 0,
@@ -57,6 +66,13 @@ export function EmailSender() {
     current: 0,
   });
   const cancelRef = useRef(false);
+
+  const mailer = useSyncExternalStore(
+    subscribeMailer,
+    getMailerSnapshot,
+    getServerMailerSnapshot
+  );
+  const configured = isMailerConfigured(mailer);
 
   const total = recipients.length;
   const estimated = formatDuration(total * delaySec);
@@ -92,14 +108,30 @@ export function EmailSender() {
 
   return (
     <div className="space-y-6">
+      <div className="animate-fade-up flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-100">Envío Rápido</h2>
+          <p className="mt-1 text-sm text-slate-400">
+            Carga tu CSV, elige una plantilla y envía la campaña.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setSettingsOpen(true)}
+          className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+        >
+          <span
+            className={`h-2 w-2 rounded-full ${
+              configured ? "bg-emerald-400" : "bg-amber-400"
+            }`}
+          />
+          Ajustes del Remitente
+        </button>
+      </div>
+
       <div className="animate-fade-up rounded-2xl border border-white/10 bg-white/[0.03] p-6 shadow-xl shadow-black/20 backdrop-blur-xl">
         <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-100">Emisor de Correos Masivos</h2>
-            <p className="mt-1 text-sm text-slate-400">
-              Recibe prospectos desde el buscador o carga un CSV.
-            </p>
-          </div>
+          <h3 className="text-sm font-semibold text-slate-100">Destinatarios</h3>
           {total > 0 && (
             <button
               onClick={clearRecipients}
@@ -109,36 +141,45 @@ export function EmailSender() {
             </button>
           )}
         </div>
-        <div className="mt-5">
+        <div className="mt-4">
           <RecipientList />
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="animate-fade-up">
-          <TemplateEditor subject={subject} onSubject={setSubject} body={body} onBody={setBody} />
-        </div>
-        <div className="space-y-6">
-          <AntiSpam delaySec={delaySec} onDelay={setDelaySec} />
-          <SenderSettings />
-        </div>
+      <div className="animate-fade-up">
+        <TemplateEditor subject={subject} onSubject={setSubject} body={body} onBody={setBody} />
       </div>
 
-      <div className="animate-fade-up flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] p-6 shadow-xl shadow-black/20 backdrop-blur-xl">
+      <div className="animate-fade-up flex flex-col gap-4 rounded-2xl border border-white/10 bg-white/[0.03] p-6 shadow-xl shadow-black/20 backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between">
         <div className="text-sm text-slate-400">
           <p>
             {total} destinatario{total === 1 ? "" : "s"} listado{total === 1 ? "" : "s"}
           </p>
-          <p className="text-xs text-slate-600">Tiempo estimado: {estimated}</p>
+          <p className="text-xs text-slate-600">
+            Intervalo anti-spam: {delaySec} s · Tiempo estimado: {estimated}
+          </p>
         </div>
         <button
           onClick={() => setPhase("confirm")}
           disabled={total === 0}
-          className="rounded-xl bg-emerald-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-400 disabled:opacity-50"
+          className="rounded-xl bg-emerald-500 px-8 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-400 disabled:opacity-50"
         >
-          Enviar Correos
+          Enviar Campaña
         </button>
       </div>
+
+      <Modal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        title="Ajustes del Remitente"
+        description="Se guardan en este dispositivo y solo se configuran una vez."
+        className="max-w-2xl"
+      >
+        <div className="space-y-5">
+          <SenderSettings />
+          <AntiSpam delaySec={delaySec} onDelay={setDelaySec} />
+        </div>
+      </Modal>
 
       {phase !== "idle" && (
         <SendModal
