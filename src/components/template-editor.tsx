@@ -1,13 +1,19 @@
 "use client";
 
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useId, useState, useSyncExternalStore } from "react";
 import { CHIPS, isHtmlTemplate, renderTemplate, senderExtras } from "@/lib/template";
 import {
   getMailerSnapshot,
   getServerMailerSnapshot,
   subscribeMailer,
 } from "@/lib/mailer";
-import { EMAIL_TEMPLATES } from "@/lib/email-templates";
+import {
+  EMAIL_TEMPLATES,
+  applyFieldsToHtml,
+  hasEditableFields,
+  parseFields,
+  type TemplateFields,
+} from "@/lib/email-templates";
 import type { Prospect } from "@/lib/types";
 
 interface Props {
@@ -16,6 +22,8 @@ interface Props {
   body: string;
   onBody: (s: string) => void;
 }
+
+type Mode = "visual" | "code";
 
 const DEFAULT_SENDER_NAME = "Nombre de Remitente";
 const DEFAULT_SENDER_EMAIL = "correo@tudominio.com";
@@ -34,8 +42,9 @@ const SAMPLE: Prospect = {
 };
 
 export function TemplateEditor({ subject, onSubject, body, onBody }: Props) {
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
-  const [activeTemplate, setActiveTemplate] = useState<string | null>(null);
+  const [mode, setMode] = useState<Mode>("visual");
+  const [activeId, setActiveId] = useState<string>(EMAIL_TEMPLATES[0].id);
+  const [fields, setFields] = useState<TemplateFields>(EMAIL_TEMPLATES[0].defaults);
   const mailer = useSyncExternalStore(
     subscribeMailer,
     getMailerSnapshot,
@@ -49,52 +58,78 @@ export function TemplateEditor({ subject, onSubject, body, onBody }: Props) {
     senderEmail: mailer.senderEmail || fromEmail,
   });
 
+  const editable = hasEditableFields(body);
+
   function applyTemplate(id: string) {
     const tpl = EMAIL_TEMPLATES.find((t) => t.id === id);
     if (!tpl) return;
-    setActiveTemplate(id);
+    setActiveId(id);
+    setFields(tpl.defaults);
     onSubject(tpl.subject);
-    onBody(tpl.html);
+    onBody(tpl.build(tpl.defaults));
+    setMode("visual");
   }
 
-  function insertChip(token: string, target: "subject" | "body") {
-    if (target === "subject") {
-      onSubject(subject + token);
-      return;
+  function updateField(key: keyof TemplateFields, value: string) {
+    const next = { ...fields, [key]: value };
+    setFields(next);
+    onBody(applyFieldsToHtml(body, next));
+  }
+
+  function switchMode(next: Mode) {
+    if (next === mode) return;
+    if (next === "visual" && editable) {
+      const parsed = parseFields(body);
+      setFields(parsed);
+      onBody(applyFieldsToHtml(body, parsed));
     }
-    const el = bodyRef.current;
-    if (el) {
-      const start = el.selectionStart ?? body.length;
-      const end = el.selectionEnd ?? body.length;
-      const next = body.slice(0, start) + token + body.slice(end);
-      onBody(next);
-      requestAnimationFrame(() => {
-        el.focus();
-        el.selectionStart = el.selectionEnd = start + token.length;
-      });
-    } else {
-      onBody(body + token);
+    setMode(next);
+  }
+
+  function insertToken(token: string) {
+    const el = document.activeElement;
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      const key = el.dataset.field as keyof TemplateFields | undefined;
+      if (key && key in fields) {
+        const start = el.selectionStart ?? el.value.length;
+        const end = el.selectionEnd ?? el.value.length;
+        const next = el.value.slice(0, start) + token + el.value.slice(end);
+        updateField(key, next);
+        requestAnimationFrame(() => {
+          el.focus();
+          el.selectionStart = el.selectionEnd = start + token.length;
+        });
+        return;
+      }
     }
+    updateField("mensaje", fields.mensaje + token);
   }
 
   const previewHtml = isHtmlTemplate(body);
 
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 shadow-xl shadow-black/20 backdrop-blur-xl">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-sm font-semibold text-slate-100">Plantilla / Editor de Mensaje</h3>
-        {activeTemplate && (
-          <span className="text-[11px] text-slate-500">
-            {EMAIL_TEMPLATES.find((t) => t.id === activeTemplate)?.name}
-          </span>
-        )}
+        <div
+          role="tablist"
+          aria-label="Modo de edición"
+          className="flex gap-1 rounded-xl border border-white/10 bg-slate-950/40 p-1"
+        >
+          <ModeTab active={mode === "visual"} onClick={() => switchMode("visual")}>
+            Editor Visual
+          </ModeTab>
+          <ModeTab active={mode === "code"} onClick={() => switchMode("code")}>
+            Código HTML
+          </ModeTab>
+        </div>
       </div>
 
       <div className="mt-4">
         <p className="mb-2 text-xs font-medium text-slate-400">Plantillas prediseñadas</p>
         <div className="grid gap-2 sm:grid-cols-3">
           {EMAIL_TEMPLATES.map((tpl) => {
-            const active = activeTemplate === tpl.id;
+            const active = activeId === tpl.id;
             return (
               <button
                 key={tpl.id}
@@ -135,34 +170,88 @@ export function TemplateEditor({ subject, onSubject, body, onBody }: Props) {
         />
       </div>
 
-      <div className="mt-4">
-        <div className="mb-1.5 flex items-center justify-between gap-2">
-          <label htmlFor="tpl-body" className="text-xs font-medium text-slate-400">
-            Cuerpo (HTML / Texto)
-          </label>
-          <div className="flex flex-wrap gap-1.5">
+      {mode === "visual" ? (
+        <div className="mt-5 space-y-4">
+          {!editable && (
+            <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-[11px] text-amber-300">
+              El contenido actual no usa campos editables. Elige una plantilla prediseñada
+              o edita el HTML en la pestaña «Código HTML».
+            </p>
+          )}
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-[11px] text-slate-500">Insertar variable:</span>
             {CHIPS.map((c) => (
               <button
                 key={c.token}
                 type="button"
-                onClick={() => insertChip(c.token, "body")}
+                onClick={() => insertToken(c.token)}
                 className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] font-medium text-sky-300 transition hover:bg-white/10"
               >
                 + {c.label}
               </button>
             ))}
           </div>
+
+          <Field
+            label="Saludo / Encabezado"
+            fieldKey="saludo"
+            value={fields.saludo}
+            onChange={updateField}
+          />
+
+          <Field
+            label="Mensaje Principal"
+            fieldKey="mensaje"
+            value={fields.mensaje}
+            onChange={updateField}
+            multiline
+            rows={6}
+          />
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field
+              label="Texto del Botón (CTA)"
+              fieldKey="ctaTexto"
+              value={fields.ctaTexto}
+              onChange={updateField}
+            />
+            <Field
+              label="Enlace del Botón (CTA)"
+              fieldKey="ctaEnlace"
+              value={fields.ctaEnlace}
+              onChange={updateField}
+              type="url"
+            />
+          </div>
+
+          <Field
+            label="Firma Personalizada"
+            fieldKey="firma"
+            value={fields.firma}
+            onChange={updateField}
+            multiline
+            rows={3}
+          />
         </div>
-        <textarea
-          ref={bodyRef}
-          id="tpl-body"
-          value={body}
-          onChange={(e) => onBody(e.target.value)}
-          rows={9}
-          spellCheck={false}
-          className="w-full resize-y rounded-xl border border-white/10 bg-slate-900/60 px-3.5 py-2.5 font-mono text-xs text-slate-100 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-        />
-      </div>
+      ) : (
+        <div className="mt-5">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <label htmlFor="tpl-body" className="text-xs font-medium text-slate-400">
+              Código HTML
+            </label>
+            <span className="text-[11px] text-slate-600">Modo avanzado</span>
+          </div>
+          <textarea
+            id="tpl-body"
+            value={body}
+            onChange={(e) => onBody(e.target.value)}
+            rows={14}
+            spellCheck={false}
+            className="w-full resize-y rounded-xl border border-white/10 bg-slate-900/60 px-3.5 py-2.5 font-mono text-xs text-slate-100 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+          />
+        </div>
+      )}
 
       <div className="mt-4">
         <p className="mb-1.5 text-xs font-medium text-slate-400">Vista previa</p>
@@ -184,6 +273,82 @@ export function TemplateEditor({ subject, onSubject, body, onBody }: Props) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function ModeTab({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+        active
+          ? "bg-slate-700/70 text-white shadow-sm"
+          : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Field({
+  label,
+  fieldKey,
+  value,
+  onChange,
+  multiline,
+  rows = 3,
+  type = "text",
+}: {
+  label: string;
+  fieldKey: keyof TemplateFields;
+  value: string;
+  onChange: (key: keyof TemplateFields, value: string) => void;
+  multiline?: boolean;
+  rows?: number;
+  type?: string;
+}) {
+  const id = useId();
+  const classes =
+    "w-full rounded-xl border border-white/10 bg-slate-900/60 px-3.5 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20";
+  return (
+    <div>
+      <label htmlFor={id} className="mb-1.5 block text-xs font-medium text-slate-400">
+        {label}
+      </label>
+      {multiline ? (
+        <textarea
+          id={id}
+          data-field={fieldKey}
+          value={value}
+          onChange={(e) => onChange(fieldKey, e.target.value)}
+          rows={rows}
+          className={`${classes} resize-y`}
+        />
+      ) : (
+        <input
+          id={id}
+          data-field={fieldKey}
+          type={type}
+          value={value}
+          onChange={(e) => onChange(fieldKey, e.target.value)}
+          autoComplete="off"
+          spellCheck={false}
+          className={classes}
+        />
+      )}
     </div>
   );
 }
