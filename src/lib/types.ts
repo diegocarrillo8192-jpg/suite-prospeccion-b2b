@@ -36,6 +36,8 @@ export interface Prospect {
   website: string;
   ciudad: string;
   rubro: string;
+  rating?: number;
+  reviews?: number;
   emails?: string[];
   social?: SocialLinks;
   emailStatus?: EmailValidationStatus;

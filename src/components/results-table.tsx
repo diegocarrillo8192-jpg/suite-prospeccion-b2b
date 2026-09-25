@@ -152,6 +152,20 @@ function OpportunityBadge({ opportunity }: { opportunity?: WebOpportunity }) {
   );
 }
 
+function RatingBadge({ rating, reviews }: { rating?: number; reviews?: number }) {
+  if (typeof rating !== "number" || !Number.isFinite(rating)) return null;
+  return (
+    <span
+      className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-300"
+      title={`${rating.toFixed(1)} de 5${typeof reviews === "number" ? ` · ${reviews} reseñas` : ""}`}
+    >
+      <span aria-hidden="true">★</span>
+      {rating.toFixed(1)}
+      {typeof reviews === "number" && <span className="text-slate-500">({reviews})</span>}
+    </span>
+  );
+}
+
 interface EmailExtractResult {
   id: string;
   emails: string[];
@@ -690,10 +704,23 @@ function ProspectRow({
           aria-label={`Seleccionar ${prospect.empresa}`}
         />
       </td>
-      <td className="px-3 py-3 font-medium text-slate-100">{prospect.empresa}</td>
+      <td className="px-3 py-3 font-medium text-slate-100">
+        <div className="flex flex-col gap-0.5">
+          <span>{prospect.empresa}</span>
+          <RatingBadge rating={prospect.rating} reviews={prospect.reviews} />
+        </div>
+      </td>
       <td className="px-3 py-3">
         <div className="flex flex-col items-start gap-1.5">
           <span className="text-slate-300">{prospect.correo}</span>
+          {prospect.emails && prospect.emails.length > 1 && (
+            <span
+              className="text-[10px] text-slate-500"
+              title={prospect.emails.join(", ")}
+            >
+              +{prospect.emails.length - 1} correo{prospect.emails.length - 1 === 1 ? "" : "s"} más
+            </span>
+          )}
           <span
             title={prospect.emailReason || "Correo no verificado"}
             className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium ${STATUS_STYLES[status]}`}

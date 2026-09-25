@@ -8,8 +8,12 @@ import {
   clearProviderKeys,
   getProvidersSnapshot,
   getServerProvidersSnapshot,
+  hasAnyApiKey,
+  isApiMode,
+  preferredApiEngine,
   saveProviderConfig,
   subscribeProviders,
+  type EngineId,
   type ProviderConfig,
 } from "@/lib/providers";
 
@@ -29,6 +33,20 @@ export function ProviderSettings({ open, onClose }: Props) {
   const [emailActor, setEmailActor] = useState(config.emailActor || DEFAULT_EMAIL_ACTOR);
   const [googleKey, setGoogleKey] = useState(config.googleKey);
   const [msg, setMsg] = useState<string | null>(null);
+
+  const apiMode = isApiMode(config.engine);
+  const apiReady = hasAnyApiKey(config);
+
+  function setMode(next: "local" | "api") {
+    const engine: EngineId =
+      next === "local" ? "free" : preferredApiEngine(config) === "free" ? "apify" : preferredApiEngine(config);
+    saveProviderConfig({ ...config, engine });
+    setMsg(next === "local" ? "Modo Gratis activado: sin créditos ni claves." : "Modo API Key activado.");
+  }
+
+  function setApiEngine(engine: EngineId) {
+    saveProviderConfig({ ...config, engine });
+  }
 
   function onSave() {
     const next: ProviderConfig = {
@@ -59,14 +77,70 @@ export function ProviderSettings({ open, onClose }: Props) {
       description="Las claves se guardan ofuscadas en el almacenamiento local de tu navegador."
     >
       <div className="space-y-4">
+        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 shadow-xl shadow-black/20 backdrop-blur-xl">
+          <p className="text-sm font-semibold text-slate-100">Modo de extracción</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setMode("local")}
+              className={`rounded-xl border px-3 py-2.5 text-left text-sm transition ${
+                apiMode
+                  ? "border-white/10 text-slate-400 hover:bg-white/5"
+                  : "border-sky-500/50 bg-sky-500/10 text-sky-200"
+              }`}
+            >
+              <span className="block font-semibold">Modo Gratis (Scraping Local)</span>
+              <span className="mt-0.5 block text-[11px] opacity-80">Playwright · Sin créditos</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("api")}
+              className={`rounded-xl border px-3 py-2.5 text-left text-sm transition ${
+                apiMode
+                  ? "border-sky-500/50 bg-sky-500/10 text-sky-200"
+                  : "border-white/10 text-slate-400 hover:bg-white/5"
+              }`}
+            >
+              <span className="block font-semibold">Modo API Key</span>
+              <span className="mt-0.5 block text-[11px] opacity-80">
+                {apiReady ? "Apify / Google Places" : "Añade una clave abajo"}
+              </span>
+            </button>
+          </div>
+
+          {apiMode && (
+            <div className="mt-3">
+              <span className="mb-1.5 block text-xs font-medium text-slate-400">Proveedor API</span>
+              <select
+                value={apiReady ? config.engine : "apify"}
+                onChange={(e) => setApiEngine(e.target.value as EngineId)}
+                className="w-full rounded-lg border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-sky-500"
+              >
+                <option value="apify">Apify Cloud API{config.apifyToken.trim() ? "" : " — sin clave"}</option>
+                <option value="google">
+                  Google Places API{config.googleKey.trim() ? "" : " — sin clave"}
+                </option>
+              </select>
+            </div>
+          )}
+
+          {!apiMode && (
+            <p className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-300">
+              Modo Gratis: no requiere créditos ni claves de API. Usa scraping local de Google
+              Maps (Playwright) y extrae correos, WhatsApp y redes sociales de cada sitio web.
+            </p>
+          )}
+        </div>
+
         <ProviderCard
-          title="Motor Gratuito Local"
-          subtitle="OpenStreetMap (Overpass) + Google Maps · Sin API Key"
-          active
+          title="Scraping Local (Playwright)"
+          subtitle="Google Maps + OpenStreetMap + buscadores web · Sin API Key"
+          active={!apiMode}
         >
           <p className="text-xs text-slate-400">
-            Motor por defecto. Extrae empresas locales desde OpenStreetMap, Google Maps y
-            buscadores web sin credenciales.
+            Motor por defecto. Extrae nombre, teléfono, dirección, sitio web, categoría,
+            calificación y reseñas directamente de Google Maps, y luego rastrea el sitio web de
+            cada negocio para obtener correos, WhatsApp y redes sociales. Sin costo.
           </p>
         </ProviderCard>
 

@@ -71,6 +71,7 @@ export async function POST(request: NextRequest) {
   const apifyToken = readKey(body.apifyToken, 200);
   const apifyActor = readKey(body.apifyActor, 120);
   const googleKey = readKey(body.googleKey, 200);
+  const deepCrawl = body.deepCrawl !== false;
 
   if (!city.trim()) {
     return NextResponse.json(
@@ -108,8 +109,10 @@ export async function POST(request: NextRequest) {
       city,
       limit,
       keys: { apifyToken, apifyActor, googleKey },
+      deepCrawl,
     });
-    return NextResponse.json({ success: true, prospects, meta });
+    const usedFallback = engine !== "free" && meta.source.includes("Scraping Local");
+    return NextResponse.json({ success: true, prospects, meta, usedFallback });
   } catch (err) {
     if (err instanceof ExtractionError && err.code.startsWith("missing_")) {
       return NextResponse.json(

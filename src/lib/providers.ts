@@ -150,10 +150,24 @@ export function hasEngineKey(config: ProviderConfig, engine: EngineId): boolean 
   return true;
 }
 
+export function hasAnyApiKey(config: ProviderConfig): boolean {
+  return config.apifyToken.trim().length > 0 || config.googleKey.trim().length > 0;
+}
+
+export function preferredApiEngine(config: ProviderConfig): EngineId {
+  if (config.googleKey.trim().length > 0) return "google";
+  if (config.apifyToken.trim().length > 0) return "apify";
+  return "free";
+}
+
+export function isApiMode(engine: EngineId): boolean {
+  return engine === "apify" || engine === "google";
+}
+
 export function engineLabel(engine: EngineId): string {
   if (engine === "apify") return "Apify Cloud API";
   if (engine === "google") return "Google Places Official API";
-  return "Scraper Local";
+  return "Scraping Local (Playwright)";
 }
 
 export function maskSecret(value: string): string {

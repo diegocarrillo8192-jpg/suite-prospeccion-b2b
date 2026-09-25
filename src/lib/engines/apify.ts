@@ -20,6 +20,8 @@ interface ApifyPlace {
   city?: string;
   countryCode?: string;
   categoryName?: string;
+  totalScore?: number;
+  reviewsCount?: number;
   url?: string;
 }
 
@@ -101,6 +103,8 @@ export async function extractWithApify(request: EngineRequest): Promise<EngineRe
       website,
       ciudad: place.city || cityName,
       rubro: place.categoryName || request.niche.trim() || "negocios",
+      rating: typeof place.totalScore === "number" ? place.totalScore : undefined,
+      reviews: typeof place.reviewsCount === "number" ? place.reviewsCount : undefined,
     };
   });
 

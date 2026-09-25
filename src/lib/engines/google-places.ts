@@ -17,6 +17,8 @@ const FIELD_MASK = [
   "places.nationalPhoneNumber",
   "places.internationalPhoneNumber",
   "places.primaryTypeDisplayName",
+  "places.rating",
+  "places.userRatingCount",
   "nextPageToken",
 ].join(",");
 
@@ -30,6 +32,8 @@ interface GooglePlace {
   nationalPhoneNumber?: string;
   internationalPhoneNumber?: string;
   primaryTypeDisplayName?: { text?: string };
+  rating?: number;
+  userRatingCount?: number;
 }
 
 interface GoogleSearchResponse {
@@ -110,6 +114,8 @@ export async function extractWithGooglePlaces(request: EngineRequest): Promise<E
       website,
       ciudad: cityName,
       rubro: place.primaryTypeDisplayName?.text || request.niche.trim() || "negocios",
+      rating: typeof place.rating === "number" ? place.rating : undefined,
+      reviews: typeof place.userRatingCount === "number" ? place.userRatingCount : undefined,
     };
   });
 
