@@ -25,7 +25,7 @@ interface Props {
 
 type Mode = "visual" | "code";
 
-const DEFAULT_SENDER_NAME = "Nombre de Remitente";
+const DEFAULT_SENDER_NAME = "Nombre del Remitente";
 const DEFAULT_SENDER_EMAIL = "correo@tudominio.com";
 
 const SAMPLE: Prospect = {
@@ -54,8 +54,8 @@ export function TemplateEditor({ subject, onSubject, body, onBody }: Props) {
   const fromName = mailer.senderName.trim() || DEFAULT_SENDER_NAME;
   const fromEmail = mailer.senderEmail.trim() || DEFAULT_SENDER_EMAIL;
   const extras = senderExtras({
-    senderName: mailer.senderName || fromName,
-    senderEmail: mailer.senderEmail || fromEmail,
+    senderName: mailer.senderName,
+    senderEmail: mailer.senderEmail,
   });
 
   const editable = hasEditableFields(body);

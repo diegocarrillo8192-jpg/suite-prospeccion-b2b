@@ -112,7 +112,7 @@ const RAW_TEMPLATES: RawTemplate[] = [
             </td>
           </tr>
         </table>
-        <p style="margin:20px 0 0;font-size:15px;line-height:1.6;color:#334155;"><!--F:firma-->Saludos cordiales,<br />{{remitente}}<br />{{correo_remitente}}<!--/F:firma--></p>
+        <p style="margin:20px 0 0;font-size:15px;line-height:1.6;color:#334155;"><!--F:firma-->Un saludo,<br />{{nombre_remitente}}<br />{{empresa_remitente}}<br />{{correo_remitente}}<br />{{telefono_remitente}}<!--/F:firma--></p>
       </td>
     </tr>
     <tr>
@@ -158,7 +158,7 @@ const RAW_TEMPLATES: RawTemplate[] = [
             </td>
           </tr>
         </table>
-        <p style="margin:26px 0 0;font-size:15px;line-height:1.6;color:#334155;"><!--F:firma-->Quedo atento/a a tu respuesta,<br />{{remitente}}<br />{{correo_remitente}}<!--/F:firma--></p>
+        <p style="margin:26px 0 0;font-size:15px;line-height:1.6;color:#334155;"><!--F:firma-->Un saludo,<br />{{nombre_remitente}}<br />{{empresa_remitente}}<br />{{correo_remitente}}<br />{{telefono_remitente}}<!--/F:firma--></p>
       </td>
     </tr>
   </table>
@@ -184,7 +184,7 @@ const RAW_TEMPLATES: RawTemplate[] = [
             </td>
           </tr>
         </table>
-        <p style="margin:20px 0 0;font-size:15px;line-height:1.6;color:#334155;"><!--F:firma-->Gracias por tu tiempo,<br />{{remitente}}<br />{{correo_remitente}}<!--/F:firma--></p>
+        <p style="margin:20px 0 0;font-size:15px;line-height:1.6;color:#334155;"><!--F:firma-->Un saludo,<br />{{nombre_remitente}}<br />{{empresa_remitente}}<br />{{correo_remitente}}<br />{{telefono_remitente}}<!--/F:firma--></p>
       </td>
     </tr>
     <tr>
@@ -209,7 +209,7 @@ const RAW_TEMPLATES: RawTemplate[] = [
     <p style="margin:0 0 18px;">
       <a data-cta href="https://tudominio.com" style="color:#059669;font-weight:700;text-decoration:underline;"><!--F:ctaTexto-->Responder ahora<!--/F:ctaTexto--></a>
     </p>
-    <p style="margin:28px 0 0;color:#334155;"><!--F:firma-->Un saludo,<br />{{remitente}}<br />{{empresa_remitente}}<br />{{correo_remitente}}<br />{{telefono}}<!--/F:firma--></p>
+    <p style="margin:28px 0 0;color:#334155;"><!--F:firma-->Un saludo,<br />{{nombre_remitente}}<br />{{empresa_remitente}}<br />{{correo_remitente}}<br />{{telefono_remitente}}<!--/F:firma--></p>
   </div>
 </div>`,
   },

@@ -31,13 +31,25 @@ export interface SenderIdentity {
   senderEmail: string;
 }
 
+export const SIGNATURE_DEFAULTS = {
+  nombre_remitente: "Nombre del Remitente",
+  empresa_remitente: "Nombre de la Empresa",
+  correo_remitente: "correo@tudominio.com",
+  telefono_remitente: "+00 000 000 0000",
+} as const;
+
 export function senderExtras(sender: SenderIdentity): Record<string, string> {
-  const name = sender.senderName.trim() || "Tu Nombre";
-  const [primary, company] = name.split("|");
+  const [primary, company] = sender.senderName
+    .trim()
+    .split("|")
+    .map((part) => part.trim());
+  const nombreRemitente = primary || SIGNATURE_DEFAULTS.nombre_remitente;
   return {
-    remitente: primary.trim() || name,
-    empresa_remitente: (company?.trim() || primary.trim() || "Tu Empresa"),
-    correo_remitente: sender.senderEmail.trim() || "tucorreo@tudominio.com",
+    nombre_remitente: nombreRemitente,
+    empresa_remitente: company || SIGNATURE_DEFAULTS.empresa_remitente,
+    correo_remitente: sender.senderEmail.trim() || SIGNATURE_DEFAULTS.correo_remitente,
+    telefono_remitente: SIGNATURE_DEFAULTS.telefono_remitente,
+    remitente: nombreRemitente,
   };
 }
 
