@@ -11,18 +11,22 @@ import {
   getMailerSnapshot,
   isMailerConfigured,
   mailerModeLabel,
+  providerConfigFrom,
   saveMailerConfig,
   type MailerConfig,
   type MailerMode,
 } from "@/lib/mailer";
 
 type Tone = "ok" | "error";
+type Notice = { tone: Tone; text: string } | null;
 
 export function SenderSettings() {
   const [form, setForm] = useState<MailerConfig>(() => getMailerSnapshot());
   const [testing, setTesting] = useState(false);
+  const [checking, setChecking] = useState(false);
   const busyRef = useRef(false);
-  const [notice, setNotice] = useState<{ tone: Tone; text: string } | null>(null);
+  const [notice, setNotice] = useState<Notice>(null);
+  const [connection, setConnection] = useState<Notice>(null);
 
   const configured = isMailerConfigured(form);
 
@@ -45,13 +49,49 @@ export function SenderSettings() {
   function onClear() {
     clearMailerSecrets();
     setForm(getMailerSnapshot());
+    setConnection(null);
     setNotice({ tone: "ok", text: "Credenciales y claves eliminadas del dispositivo." });
   }
 
-  async function onTest() {
+  async function onTestConnection() {
+    if (busyRef.current) return;
+    if (form.mode !== "simulated" && !isValidEmail(form.senderEmail)) {
+      setConnection({ tone: "error", text: "Define un correo remitente válido antes de probar." });
+      return;
+    }
+    busyRef.current = true;
+    setChecking(true);
+    setConnection(null);
+    try {
+      const res = await fetch("/api/test-connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(providerConfigFrom(form)),
+      });
+      const data = await res.json();
+      if (res.ok && data?.success === true) {
+        setConnection({
+          tone: "ok",
+          text: typeof data?.message === "string" ? data.message : "Conexión verificada.",
+        });
+      } else {
+        setConnection({
+          tone: "error",
+          text: typeof data?.message === "string" ? data.message : "No se pudo verificar la conexión.",
+        });
+      }
+    } catch {
+      setConnection({ tone: "error", text: "Error de conexión al probar las credenciales." });
+    } finally {
+      busyRef.current = false;
+      setChecking(false);
+    }
+  }
+
+  async function onTestEmail() {
     if (busyRef.current) return;
     if (!isValidEmail(form.senderEmail)) {
-      setNotice({ tone: "error", text: "Define un correo remitente válido antes de probar." });
+      setNotice({ tone: "error", text: "Define un correo remitente válido antes de enviar la prueba." });
       return;
     }
     busyRef.current = true;
@@ -62,9 +102,8 @@ export function SenderSettings() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          ...providerConfigFrom(form),
           to: form.senderEmail,
-          mode: form.mode,
-          senderName: form.senderName,
         }),
       });
       const data = await res.json();
@@ -108,7 +147,7 @@ export function SenderSettings() {
       <div
         role="radiogroup"
         aria-label="Canal de envío"
-        className="mt-4 grid grid-cols-2 gap-1 rounded-xl border border-white/10 bg-slate-950/40 p-1"
+        className="mt-4 grid grid-cols-2 gap-1 rounded-xl border border-white/10 bg-slate-950/40 p-1 sm:grid-cols-3"
       >
         {MAILER_MODES.map((mode) => {
           const active = form.mode === mode.id;
@@ -158,6 +197,22 @@ export function SenderSettings() {
       </div>
 
       <div className="mt-4 space-y-3 border-t border-white/10 pt-4">
+        {form.mode === "gmail" && (
+          <>
+            <SecretField
+              label="App Password de Gmail"
+              value={form.appPassword}
+              onChange={(v) => patch("appPassword", v)}
+              placeholder="••••••••••••••••"
+            />
+            <p className="rounded-lg border border-white/10 bg-slate-900/50 p-3 text-[11px] leading-relaxed text-slate-400">
+              Usa el correo remitente como usuario y una App Password de 16 caracteres generada
+              desde la configuración de seguridad de tu cuenta Google (requiere verificación en
+              dos pasos). Servidor: smtp.gmail.com · Puerto: 587.
+            </p>
+          </>
+        )}
+
         {form.mode === "smtp" && (
           <>
             <div className="grid grid-cols-3 gap-3">
@@ -226,7 +281,15 @@ export function SenderSettings() {
         </button>
         <button
           type="button"
-          onClick={onTest}
+          onClick={onTestConnection}
+          disabled={checking}
+          className="inline-flex items-center gap-1.5 rounded-xl border border-sky-500/40 bg-sky-500/10 px-4 py-2.5 text-sm font-semibold text-sky-300 transition hover:bg-sky-500/20 disabled:opacity-50"
+        >
+          {checking ? "Probando…" : "Probar Conexión"}
+        </button>
+        <button
+          type="button"
+          onClick={onTestEmail}
           disabled={testing}
           className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-2.5 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-500/20 disabled:opacity-50"
         >
@@ -241,12 +304,16 @@ export function SenderSettings() {
         </button>
       </div>
 
-      {notice && (
+      {connection && (
         <p
-          className={`mt-3 text-xs ${
-            notice.tone === "ok" ? "text-emerald-400" : "text-rose-400"
-          }`}
+          className={`mt-3 text-xs ${connection.tone === "ok" ? "text-sky-400" : "text-rose-400"}`}
         >
+          {connection.text}
+        </p>
+      )}
+
+      {notice && (
+        <p className={`mt-3 text-xs ${notice.tone === "ok" ? "text-emerald-400" : "text-rose-400"}`}>
           {notice.text}
         </p>
       )}

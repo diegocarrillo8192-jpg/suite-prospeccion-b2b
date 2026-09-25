@@ -57,20 +57,26 @@ describe("Emisor de Correos — flujo completo de campaña", () => {
   it("b) cambia entre las plantillas prediseñadas", () => {
     renderSender();
 
-    const corporativa = screen.getByRole("button", { name: /Corporativa/ });
-    expect(corporativa.getAttribute("aria-pressed")).toBe("true");
-    expect(fieldValue("Asunto")).toBe("Propuesta de colaboración para {{empresa}}");
+    const presentacion = screen.getByRole("button", { name: /Presentación Comercial/ });
+    expect(presentacion.getAttribute("aria-pressed")).toBe("true");
+    expect(fieldValue("Asunto")).toBe("Propuesta para {{empresa}}");
 
-    fireEvent.click(screen.getByRole("button", { name: /Carta Comercial/ }));
-    expect(fieldValue("Asunto")).toBe("Una propuesta pensada para {{empresa}}");
-    expect(screen.getByText("Atentamente,")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Propuesta de Servicios/ }));
+    expect(fieldValue("Asunto")).toBe("Propuesta de servicios para {{empresa}}");
+    expect(screen.getByText(/Una propuesta para Empresa de Ejemplo/)).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: /Carta Comercial/ }).getAttribute("aria-pressed")
+      screen
+        .getByRole("button", { name: /Propuesta de Servicios/ })
+        .getAttribute("aria-pressed")
     ).toBe("true");
 
-    fireEvent.click(screen.getByRole("button", { name: /Promocional/ }));
-    expect(fieldValue("Asunto")).toBe("{{empresa}}: una oportunidad para crecer");
-    expect(screen.getByText(/Potenciá Lumen Digital/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Auditoría Web/ }));
+    expect(fieldValue("Asunto")).toBe("Auditoría web para {{empresa}}");
+    expect(screen.getAllByText(/diagnóstico sin costo/).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /Contacto Directo/ }));
+    expect(fieldValue("Asunto")).toBe("Contacto directo para {{empresa}}");
+    expect(screen.getAllByText(/Te escribo directamente/).length).toBeGreaterThan(0);
   });
 
   it("c) actualiza la vista previa en tiempo real desde el editor visual", async () => {
@@ -81,7 +87,7 @@ describe("Emisor de Correos — flujo completo de campaña", () => {
     });
     await waitFor(() => {
       expect(
-        screen.getByText(/Propuesta exclusiva para Lumen Digital en Buenos Aires/)
+        screen.getByText(/Propuesta exclusiva para Empresa de Ejemplo en Ciudad de Ejemplo/)
       ).toBeTruthy();
     });
 
@@ -131,8 +137,9 @@ describe("Emisor de Correos — flujo completo de campaña", () => {
 
     const { container } = renderSender();
 
-    // 1. Abrir ajustes y validar correo inválido
+    // 1. Abrir ajustes, elegir SMTP personalizado y validar correo inválido
     fireEvent.click(screen.getByRole("button", { name: /Ajustes del Remitente/ }));
+    fireEvent.click(screen.getByRole("radio", { name: "SMTP Personalizado" }));
     const email = screen.getByLabelText("Correo Remitente");
     fireEvent.change(email, { target: { value: "correo-invalido" } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar Remitente" }));

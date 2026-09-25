@@ -16,11 +16,12 @@ const SAMPLE_FIELDS: TemplateFields = {
 };
 
 describe("galería de plantillas prediseñadas", () => {
-  it("incluye las tres plantillas solicitadas", () => {
+  it("incluye las plantillas profesionales solicitadas", () => {
     expect(EMAIL_TEMPLATES.map((t) => t.id)).toEqual([
-      "corporativa",
-      "carta",
-      "promocional",
+      "presentacion",
+      "propuesta",
+      "auditoria",
+      "contacto",
     ]);
   });
 

@@ -9,6 +9,8 @@ const FIELDS: Record<string, (p: Prospect) => string> = {
   telefono: (p) => p.telefono,
   whatsapp: (p) => p.whatsapp,
   website: (p) => p.website,
+  sitio_web: (p) => p.website,
+  direccion: (p) => p.direccion,
 };
 
 export function renderTemplate(
@@ -47,4 +49,6 @@ export const CHIPS: { token: string; label: string }[] = [
   { token: "{{nombre}}", label: "Nombre" },
   { token: "{{empresa}}", label: "Empresa" },
   { token: "{{ciudad}}", label: "Ciudad" },
+  { token: "{{telefono}}", label: "Teléfono" },
+  { token: "{{sitio_web}}", label: "Sitio Web" },
 ];

@@ -2,12 +2,14 @@
 
 import { useEffect, useRef } from "react";
 import { formatDuration } from "@/lib/format";
+import { averageDelaySec } from "@/lib/email-providers";
 import type { SendStatus } from "@/lib/types";
 
 interface Props {
   mode: "confirm" | "sending" | "done";
   total: number;
-  delaySec: number;
+  delayMinSec: number;
+  delayMaxSec: number;
   progress: SendStatus;
   onConfirm: () => void;
   onCancel: () => void;
@@ -17,7 +19,8 @@ interface Props {
 export function SendModal({
   mode,
   total,
-  delaySec,
+  delayMinSec,
+  delayMaxSec,
   progress,
   onConfirm,
   onCancel,
@@ -47,12 +50,15 @@ export function SendModal({
             <h3 className="text-lg font-semibold text-slate-100">Confirmar envío</h3>
             <div className="mt-4 space-y-2 text-sm">
               <Row label="Destinatarios" value={String(total)} />
-              <Row label="Retraso entre envíos" value={`${delaySec} s`} />
-              <Row label="Tiempo estimado" value={formatDuration(total * delaySec)} />
+              <Row label="Pausa aleatoria" value={`${delayMinSec}–${delayMaxSec} s`} />
+              <Row
+                label="Tiempo estimado"
+                value={formatDuration(total * averageDelaySec(delayMinSec, delayMaxSec))}
+              />
             </div>
             <p className="mt-4 rounded-lg bg-slate-900/60 p-3 text-xs text-slate-500">
-              Los correos se enviarán de forma secuencial con los retardos configurados para
-              minimizar la detección de spam.
+              Los correos se enviarán de forma secuencial con pausas aleatorias entre cada uno
+              para simular comportamiento humano y minimizar la detección de spam.
             </p>
             <div className="mt-6 flex gap-3">
               <button

@@ -89,11 +89,11 @@ export function hasEditableFields(html: string): boolean {
 
 const RAW_TEMPLATES: RawTemplate[] = [
   {
-    id: "corporativa",
-    name: "Corporativa",
-    description: "Logo superior, tarjeta contenedora, botón CTA y firma.",
+    id: "presentacion",
+    name: "Presentación Comercial",
+    description: "Encabezado con marca, mensaje breve y botón de contacto.",
     accent: "#0b1220",
-    subject: "Propuesta de colaboración para {{empresa}}",
+    subject: "Propuesta para {{empresa}}",
     html: `<div style="margin:0;padding:24px;background:#eef2f7;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;">
     <tr>
@@ -104,7 +104,7 @@ const RAW_TEMPLATES: RawTemplate[] = [
     <tr>
       <td style="padding:32px 28px;">
         <h1 style="margin:0 0 14px;font-size:21px;line-height:1.3;color:#0f172a;"><!--F:saludo-->Hola {{nombre}},<!--/F:saludo--></h1>
-        <p style="margin:0 0 14px;font-size:15px;line-height:1.7;color:#334155;"><!--F:mensaje-->En {{empresa_remitente}} acompañamos a organizaciones como {{empresa}} en {{ciudad}} a alcanzar sus objetivos con soluciones a medida.<br /><br />Me gustaría coordinar una breve reunión para mostrarle cómo podemos generar valor.<!--/F:mensaje--></p>
+        <p style="margin:0 0 14px;font-size:15px;line-height:1.7;color:#334155;"><!--F:mensaje-->Trabajamos con organizaciones como {{empresa}} en {{ciudad}} para ayudarlas a alcanzar sus objetivos con soluciones a medida.<br /><br />Me gustaría coordinar una breve reunión para compartirte cómo podemos aportar valor.<!--/F:mensaje--></p>
         <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0;">
           <tr>
             <td style="border-radius:10px;background:#059669;">
@@ -124,47 +124,28 @@ const RAW_TEMPLATES: RawTemplate[] = [
 </div>`,
   },
   {
-    id: "carta",
-    name: "Carta Comercial",
-    description: "Texto limpio y minimalista con firma profesional.",
-    accent: "#1e293b",
-    subject: "Una propuesta pensada para {{empresa}}",
-    html: `<div style="margin:0;padding:24px;background:#ffffff;font-family:Georgia,'Times New Roman',serif;color:#1e293b;">
-  <div style="max-width:580px;margin:0 auto;font-size:16px;line-height:1.75;">
-    <p style="margin:0 0 18px;color:#64748b;font-size:13px;letter-spacing:0.4px;text-transform:uppercase;">{{ciudad}}</p>
-    <p style="margin:0 0 18px;"><!--F:saludo-->Estimado/a {{nombre}}:<!--/F:saludo--></p>
-    <p style="margin:0 0 18px;"><!--F:mensaje-->Me dirijo a usted para presentarle nuestra propuesta de servicios, pensada especialmente para {{empresa}}. Creemos que podemos aportar una mejora concreta a su operación actual.<br /><br />El objetivo de esta carta es simplemente abrir la conversación: si lo considera oportuno, con gusto puedo compartirle más detalles y ejemplos de casos similares.<!--/F:mensaje--></p>
-    <p style="margin:0 0 18px;">
-      <a data-cta href="https://tudominio.com" style="color:#2563eb;text-decoration:underline;"><!--F:ctaTexto-->Ver la propuesta completa<!--/F:ctaTexto--></a>
-    </p>
-    <p style="margin:28px 0 0;">Atentamente,</p>
-    <p style="margin:18px 0 0;font-family:Arial,Helvetica,sans-serif;line-height:1.5;"><!--F:firma-->{{remitente}}<br />{{empresa_remitente}}<br />{{correo_remitente}}<!--/F:firma--></p>
-  </div>
-</div>`,
-  },
-  {
-    id: "promocional",
-    name: "Promocional",
-    description: "Enfocada en conversión con bloque de beneficios.",
-    accent: "#7c3aed",
-    subject: "{{empresa}}: una oportunidad para crecer",
-    html: `<div style="margin:0;padding:24px;background:#f5f3ff;font-family:Arial,Helvetica,sans-serif;color:#1e1b4b;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #ddd6fe;">
+    id: "propuesta",
+    name: "Propuesta de Servicios",
+    description: "Estructura comercial con bloque de beneficios y llamada a la acción.",
+    accent: "#0e7490",
+    subject: "Propuesta de servicios para {{empresa}}",
+    html: `<div style="margin:0;padding:24px;background:#ecfeff;font-family:Arial,Helvetica,sans-serif;color:#164e63;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #cffafe;">
     <tr>
-      <td style="background:#7c3aed;padding:30px 28px;text-align:center;">
-        <p style="margin:0 0 6px;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#ddd6fe;">Propuesta de servicio</p>
-        <h1 style="margin:0;font-size:24px;line-height:1.3;color:#ffffff;"><!--F:saludo-->Potenciá {{empresa}} junto a {{empresa_remitente}}<!--/F:saludo--></h1>
+      <td style="background:#0e7490;padding:30px 28px;text-align:center;">
+        <p style="margin:0 0 6px;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#cffafe;">Propuesta de servicios</p>
+        <h1 style="margin:0;font-size:24px;line-height:1.3;color:#ffffff;"><!--F:saludo-->Una propuesta para {{empresa}}<!--/F:saludo--></h1>
       </td>
     </tr>
     <tr>
       <td style="padding:30px 28px;">
-        <p style="margin:0 0 20px;font-size:15px;line-height:1.7;color:#475569;"><!--F:mensaje-->Hola {{nombre}}, vimos que {{empresa}} está creciendo en {{ciudad}} y queremos acompañar ese proceso con una solución a tu medida.<!--/F:mensaje--></p>
+        <p style="margin:0 0 20px;font-size:15px;line-height:1.7;color:#475569;"><!--F:mensaje-->Hola {{nombre}}, preparamos una propuesta pensada para las necesidades de {{empresa}} en {{ciudad}}, con un enfoque práctico y medible.<!--/F:mensaje--></p>
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
           <tr>
-            <td style="padding:8px 0;font-size:15px;line-height:1.6;color:#334155;">✅ &nbsp;Más alcance y nuevos clientes</td>
+            <td style="padding:8px 0;font-size:15px;line-height:1.6;color:#334155;">✅ &nbsp;Alcance claro y objetivos definidos</td>
           </tr>
           <tr>
-            <td style="padding:8px 0;font-size:15px;line-height:1.6;color:#334155;">⚡ &nbsp;Procesos más rápidos y ordenados</td>
+            <td style="padding:8px 0;font-size:15px;line-height:1.6;color:#334155;">⚡ &nbsp;Implementación ágil y acompañamiento</td>
           </tr>
           <tr>
             <td style="padding:8px 0;font-size:15px;line-height:1.6;color:#334155;">📈 &nbsp;Resultados medibles desde el primer mes</td>
@@ -172,15 +153,64 @@ const RAW_TEMPLATES: RawTemplate[] = [
         </table>
         <table role="presentation" cellpadding="0" cellspacing="0">
           <tr>
-            <td style="border-radius:10px;background:#7c3aed;">
-              <a data-cta href="https://tudominio.com" style="display:inline-block;padding:14px 30px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;"><!--F:ctaTexto-->Quiero más información<!--/F:ctaTexto--></a>
+            <td style="border-radius:10px;background:#0e7490;">
+              <a data-cta href="https://tudominio.com" style="display:inline-block;padding:14px 30px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;"><!--F:ctaTexto-->Solicitar una llamada<!--/F:ctaTexto--></a>
             </td>
           </tr>
         </table>
-        <p style="margin:26px 0 0;font-size:15px;line-height:1.6;color:#334155;"><!--F:firma-->Un saludo,<br />{{remitente}}<br />{{correo_remitente}}<!--/F:firma--></p>
+        <p style="margin:26px 0 0;font-size:15px;line-height:1.6;color:#334155;"><!--F:firma-->Quedo atento/a a tu respuesta,<br />{{remitente}}<br />{{correo_remitente}}<!--/F:firma--></p>
       </td>
     </tr>
   </table>
+</div>`,
+  },
+  {
+    id: "auditoria",
+    name: "Auditoría Web",
+    description: "Diagnóstico personalizado para sitios web, enfocado en mejoras concretas.",
+    accent: "#2563eb",
+    subject: "Auditoría web para {{empresa}}",
+    html: `<div style="margin:0;padding:24px;background:#eff6ff;font-family:Arial,Helvetica,sans-serif;color:#1e3a8a;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #bfdbfe;">
+    <tr>
+      <td style="padding:30px 28px 10px;">
+        <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#2563eb;">Auditoría web gratuita</p>
+        <h1 style="margin:0 0 14px;font-size:22px;line-height:1.3;color:#0f172a;"><!--F:saludo-->Hola {{nombre}},<!--/F:saludo--></h1>
+        <p style="margin:0 0 16px;font-size:15px;line-height:1.7;color:#334155;"><!--F:mensaje-->Estuvimos revisando {{sitio_web}} y detectamos oportunidades concretas para mejorar el rendimiento, la experiencia de usuario y la conversión de visitantes en {{ciudad}}.<br /><br />Preparamos un diagnóstico sin costo para {{empresa}} con los puntos más importantes a corregir.<!--/F:mensaje--></p>
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0;">
+          <tr>
+            <td style="border-radius:10px;background:#2563eb;">
+              <a data-cta href="https://tudominio.com" style="display:inline-block;padding:13px 26px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;"><!--F:ctaTexto-->Ver el diagnóstico<!--/F:ctaTexto--></a>
+            </td>
+          </tr>
+        </table>
+        <p style="margin:20px 0 0;font-size:15px;line-height:1.6;color:#334155;"><!--F:firma-->Gracias por tu tiempo,<br />{{remitente}}<br />{{correo_remitente}}<!--/F:firma--></p>
+      </td>
+    </tr>
+    <tr>
+      <td style="background:#f8fafc;padding:14px 28px;text-align:center;font-size:12px;color:#94a3b8;">
+        {{empresa_remitente}}
+      </td>
+    </tr>
+  </table>
+</div>`,
+  },
+  {
+    id: "contacto",
+    name: "Contacto Directo",
+    description: "Mensaje breve y personal, ideal para un primer acercamiento.",
+    accent: "#059669",
+    subject: "Contacto directo para {{empresa}}",
+    html: `<div style="margin:0;padding:24px;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+  <div style="max-width:580px;margin:0 auto;font-size:16px;line-height:1.75;">
+    <p style="margin:0 0 6px;font-size:13px;letter-spacing:0.4px;text-transform:uppercase;color:#64748b;">{{ciudad}}</p>
+    <p style="margin:0 0 18px;font-size:19px;font-weight:700;"><!--F:saludo-->Hola {{nombre}},<!--/F:saludo--></p>
+    <p style="margin:0 0 18px;color:#334155;"><!--F:mensaje-->Te escribo directamente porque creo que podemos ayudar a {{empresa}}. Si quieres, te comparto una idea concreta en una llamada breve de 15 minutos.<br /><br />Puedes responderme a este correo y coordinamos el horario que mejor te venga.<!--/F:mensaje--></p>
+    <p style="margin:0 0 18px;">
+      <a data-cta href="https://tudominio.com" style="color:#059669;font-weight:700;text-decoration:underline;"><!--F:ctaTexto-->Responder ahora<!--/F:ctaTexto--></a>
+    </p>
+    <p style="margin:28px 0 0;color:#334155;"><!--F:firma-->Un saludo,<br />{{remitente}}<br />{{empresa_remitente}}<br />{{correo_remitente}}<br />{{telefono}}<!--/F:firma--></p>
+  </div>
 </div>`,
   },
 ];

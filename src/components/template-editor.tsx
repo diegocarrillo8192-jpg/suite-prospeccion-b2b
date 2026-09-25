@@ -30,15 +30,15 @@ const DEFAULT_SENDER_EMAIL = "correo@tudominio.com";
 
 const SAMPLE: Prospect = {
   id: "sample",
-  nombre: "María González",
-  empresa: "Lumen Digital",
-  correo: "contacto@lumendigital.com",
-  telefono: "+54 11 5555-1234",
-  whatsapp: "5491155551234",
-  direccion: "Av. Corrientes 1234, Buenos Aires",
-  website: "https://www.lumendigital.com",
-  ciudad: "Buenos Aires",
-  rubro: "Software",
+  nombre: "Nombre Apellido",
+  empresa: "Empresa de Ejemplo",
+  correo: "contacto@empresa-ejemplo.com",
+  telefono: "+00 000 000 0000",
+  whatsapp: "00000000000",
+  direccion: "Calle de Ejemplo 123",
+  website: "https://empresa-ejemplo.com",
+  ciudad: "Ciudad de Ejemplo",
+  rubro: "Servicios",
 };
 
 export function TemplateEditor({ subject, onSubject, body, onBody }: Props) {

@@ -1,59 +1,36 @@
 "use client";
 
-export type MailerMode = "smtp" | "resend" | "sendgrid" | "simulated";
+import {
+  DEFAULT_MAILER_CONFIG,
+  DEFAULT_DELAY_MAX_SEC,
+  DEFAULT_DELAY_MIN_SEC,
+  GMAIL_SMTP_PORT,
+  clampDelayRange,
+  isMailerMode,
+  providerConfigFrom,
+  type MailerConfig,
+  type ProviderConfig,
+} from "./email-providers";
 
-export interface MailerConfig {
-  mode: MailerMode;
-  senderName: string;
-  senderEmail: string;
-  replyTo: string;
-  smtpHost: string;
-  smtpPort: string;
-  smtpUser: string;
-  smtpPass: string;
-  resendKey: string;
-  sendgridKey: string;
-}
-
-export const SENDER_NAME_PLACEHOLDER = "Ej. Tu Nombre | Nombre de Empresa";
-export const SENDER_EMAIL_PLACEHOLDER = "ventas@tudominio.com";
-export const REPLY_TO_PLACEHOLDER = "contacto@tudominio.com";
-
-export const MAILER_MODES: { id: MailerMode; label: string; hint: string }[] = [
-  {
-    id: "smtp",
-    label: "SMTP Personalizado",
-    hint: "Conecta tu propio servidor de correo saliente.",
-  },
-  {
-    id: "resend",
-    label: "Resend API Key",
-    hint: "Envío transaccional a través de Resend.",
-  },
-  {
-    id: "sendgrid",
-    label: "SendGrid API Key",
-    hint: "Envío transaccional a través de SendGrid.",
-  },
-  {
-    id: "simulated",
-    label: "Simulado (Demo)",
-    hint: "No se envían correos reales, ideal para probar el flujo.",
-  },
-];
-
-export const DEFAULT_MAILER_CONFIG: MailerConfig = {
-  mode: "smtp",
-  senderName: "",
-  senderEmail: "",
-  replyTo: "",
-  smtpHost: "",
-  smtpPort: "587",
-  smtpUser: "",
-  smtpPass: "",
-  resendKey: "",
-  sendgridKey: "",
-};
+export {
+  MAILER_MODES,
+  REPLY_TO_PLACEHOLDER,
+  SENDER_EMAIL_PLACEHOLDER,
+  SENDER_NAME_PLACEHOLDER,
+  DELAY_MIN_SEC,
+  DELAY_MAX_SEC,
+  DEFAULT_DELAY_MIN_SEC,
+  DEFAULT_DELAY_MAX_SEC,
+  GMAIL_SMTP_HOST,
+  GMAIL_SMTP_PORT,
+  clampDelayRange,
+  mailerModeLabel,
+  isMailerConfigured,
+  providerConfigFrom,
+  randomDelaySec,
+  averageDelaySec,
+} from "./email-providers";
+export type { MailerConfig, MailerMode, ProviderConfig } from "./email-providers";
 
 const STORAGE_KEY = "b2b.mailer.v1";
 const OBFUSCATION_KEY = "suite-prospeccion-b2b::mailer::v1";
@@ -86,12 +63,12 @@ function deobfuscate(value: string): string {
   }
 }
 
-function isMailerMode(value: unknown): value is MailerMode {
-  return value === "smtp" || value === "resend" || value === "sendgrid" || value === "simulated";
-}
-
 function readString(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function readDelay(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
 function readConfig(): MailerConfig {
@@ -100,17 +77,24 @@ function readConfig(): MailerConfig {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_MAILER_CONFIG;
     const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const delays = clampDelayRange(
+      readDelay(parsed.delayMinSec, DEFAULT_DELAY_MIN_SEC),
+      readDelay(parsed.delayMaxSec, DEFAULT_DELAY_MAX_SEC)
+    );
     return {
       mode: isMailerMode(parsed.mode) ? parsed.mode : DEFAULT_MAILER_CONFIG.mode,
       senderName: readString(parsed.senderName),
       senderEmail: readString(parsed.senderEmail),
       replyTo: readString(parsed.replyTo),
       smtpHost: readString(parsed.smtpHost),
-      smtpPort: readString(parsed.smtpPort) || DEFAULT_MAILER_CONFIG.smtpPort,
+      smtpPort: readString(parsed.smtpPort) || GMAIL_SMTP_PORT,
       smtpUser: readString(parsed.smtpUser),
       smtpPass: deobfuscate(readString(parsed.smtpPass)),
+      appPassword: deobfuscate(readString(parsed.appPassword)),
       resendKey: deobfuscate(readString(parsed.resendKey)),
       sendgridKey: deobfuscate(readString(parsed.sendgridKey)),
+      delayMinSec: delays.minSec,
+      delayMaxSec: delays.maxSec,
     };
   } catch {
     return DEFAULT_MAILER_CONFIG;
@@ -143,17 +127,21 @@ export function getServerMailerSnapshot(): MailerConfig {
 }
 
 export function saveMailerConfig(config: MailerConfig): void {
+  const delays = clampDelayRange(config.delayMinSec, config.delayMaxSec);
   const next: MailerConfig = {
-    mode: config.mode,
+    mode: isMailerMode(config.mode) ? config.mode : DEFAULT_MAILER_CONFIG.mode,
     senderName: config.senderName.trim(),
     senderEmail: config.senderEmail.trim(),
     replyTo: config.replyTo.trim(),
     smtpHost: config.smtpHost.trim(),
-    smtpPort: config.smtpPort.trim() || DEFAULT_MAILER_CONFIG.smtpPort,
+    smtpPort: config.smtpPort.trim() || GMAIL_SMTP_PORT,
     smtpUser: config.smtpUser.trim(),
     smtpPass: config.smtpPass.trim(),
+    appPassword: config.appPassword.trim(),
     resendKey: config.resendKey.trim(),
     sendgridKey: config.sendgridKey.trim(),
+    delayMinSec: delays.minSec,
+    delayMaxSec: delays.maxSec,
   };
   cache = next;
   if (typeof window !== "undefined") {
@@ -169,8 +157,11 @@ export function saveMailerConfig(config: MailerConfig): void {
           smtpPort: next.smtpPort,
           smtpUser: next.smtpUser,
           smtpPass: obfuscate(next.smtpPass),
+          appPassword: obfuscate(next.appPassword),
           resendKey: obfuscate(next.resendKey),
           sendgridKey: obfuscate(next.sendgridKey),
+          delayMinSec: next.delayMinSec,
+          delayMaxSec: next.delayMaxSec,
         })
       );
     } catch {
@@ -180,24 +171,23 @@ export function saveMailerConfig(config: MailerConfig): void {
   emitChange();
 }
 
+export function updateMailerConfig(patch: Partial<MailerConfig>): MailerConfig {
+  const next: MailerConfig = { ...getMailerSnapshot(), ...patch };
+  saveMailerConfig(next);
+  return getMailerSnapshot();
+}
+
 export function clearMailerSecrets(): void {
   const current = getMailerSnapshot();
   saveMailerConfig({
     ...current,
     smtpPass: "",
+    appPassword: "",
     resendKey: "",
     sendgridKey: "",
   });
 }
 
-export function mailerModeLabel(mode: MailerMode): string {
-  return MAILER_MODES.find((m) => m.id === mode)?.label ?? "SMTP Personalizado";
-}
-
-export function isMailerConfigured(config: MailerConfig): boolean {
-  if (!config.senderEmail.trim()) return false;
-  if (config.mode === "smtp") return config.smtpHost.trim().length > 0;
-  if (config.mode === "resend") return config.resendKey.trim().length > 0;
-  if (config.mode === "sendgrid") return config.sendgridKey.trim().length > 0;
-  return true;
+export function getProviderConfig(): ProviderConfig {
+  return providerConfigFrom(getMailerSnapshot());
 }

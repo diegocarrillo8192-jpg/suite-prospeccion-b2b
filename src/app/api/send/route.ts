@@ -1,14 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isValidEmail, sanitizeHtml } from "@/lib/sanitize";
 import { rateLimit } from "@/lib/rate-limit";
+import { deterministicHash, parseProviderConfig } from "@/lib/email-providers";
+import { sendEmail } from "@/lib/server-mailer";
 
-function hashString(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) {
-    h = (Math.imul(h, 31) + s.charCodeAt(i)) | 0;
-  }
-  return Math.abs(h);
-}
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   const forwarded = request.headers.get("x-forwarded-for") ?? "";
@@ -35,6 +32,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
+  const config = parseProviderConfig(payload);
 
   const to = typeof body.to === "string" ? body.to.trim() : "";
   const subject = typeof body.subject === "string" ? body.subject.slice(0, 200) : "";
@@ -46,25 +44,42 @@ export async function POST(request: NextRequest) {
   if (!subject.trim()) {
     return NextResponse.json({ success: false, error: "missing_subject" }, { status: 400 });
   }
+  if (config.mode !== "simulated" && !isValidEmail(config.senderEmail)) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "invalid_sender",
+        message: "El correo remitente no es válido.",
+      },
+      { status: 400 }
+    );
+  }
 
   const safeBody = sanitizeHtml(rawBody);
 
-  // Punto de integración real: aquí se conectaría el proveedor SMTP/API
-  // (Resend, SES, SendGrid, etc.) usando credenciales cifradas del lado del
-  // cliente. En esta demo se simula la entrega y se reserva un pequeño
-  // porcentaje determinista de "rebotes" para ilustrar el monitor de envíos.
-  const bounce = hashString(to) % 9 === 0;
-  if (bounce) {
+  if (config.mode === "simulated") {
+    // En modo demostración se reserva un porcentaje determinista de "rebotes"
+    // para ilustrar el monitor de envíos sin conectar un proveedor real.
+    if (deterministicHash(to) % 9 === 0) {
+      return NextResponse.json({
+        success: false,
+        error: "bounce",
+        message: "Entrega rechazada (simulación de rebote).",
+      });
+    }
     return NextResponse.json({
-      success: false,
-      error: "bounce",
-      message: "Entrega rechazada (simulación de rebote).",
+      success: true,
+      id: `msg_${Date.now()}_${deterministicHash(to)}`,
+      provider: "Simulado (Demo)",
+      bodyLength: safeBody.length,
     });
   }
 
-  return NextResponse.json({
-    success: true,
-    id: `msg_${Date.now()}_${hashString(to)}`,
-    bodyLength: safeBody.length,
+  const result = await sendEmail(config, {
+    to,
+    subject,
+    html: safeBody,
   });
+
+  return NextResponse.json(result, { status: result.success ? 200 : 502 });
 }

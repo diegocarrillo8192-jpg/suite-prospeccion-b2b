@@ -10,10 +10,15 @@ import { Modal } from "./modal";
 import { renderTemplate, senderExtras } from "@/lib/template";
 import { EMAIL_TEMPLATES } from "@/lib/email-templates";
 import {
+  averageDelaySec,
   getMailerSnapshot,
   getServerMailerSnapshot,
   isMailerConfigured,
+  providerConfigFrom,
+  randomDelaySec,
   subscribeMailer,
+  updateMailerConfig,
+  type MailerConfig,
 } from "@/lib/mailer";
 import { formatDuration } from "@/lib/format";
 import type { Prospect, SendStatus } from "@/lib/types";
@@ -21,6 +26,7 @@ import type { Prospect, SendStatus } from "@/lib/types";
 type Phase = "idle" | "confirm" | "sending" | "done";
 
 const DEFAULT_TEMPLATE = EMAIL_TEMPLATES[0];
+const IS_TEST = process.env.NODE_ENV === "test";
 
 async function sendEmail(r: Prospect, subject: string, body: string): Promise<boolean> {
   try {
@@ -30,13 +36,10 @@ async function sendEmail(r: Prospect, subject: string, body: string): Promise<bo
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        ...providerConfigFrom(mailer),
         to: r.correo,
         subject: renderTemplate(subject, r, extras),
         body: renderTemplate(body, r, extras),
-        senderName: mailer.senderName,
-        senderEmail: mailer.senderEmail,
-        replyTo: mailer.replyTo || mailer.senderEmail,
-        mode: mailer.mode,
       }),
     });
     if (!res.ok) return false;
@@ -55,7 +58,6 @@ export function EmailSender() {
   const { recipients, clearRecipients } = useAppState();
   const [subject, setSubject] = useState(DEFAULT_TEMPLATE.subject);
   const [body, setBody] = useState(DEFAULT_TEMPLATE.html);
-  const [delaySec, setDelaySec] = useState(3);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState<SendStatus>({
@@ -73,9 +75,21 @@ export function EmailSender() {
     getServerMailerSnapshot
   );
   const configured = isMailerConfigured(mailer);
+  const delayMinSec = mailer.delayMinSec;
+  const delayMaxSec = mailer.delayMaxSec;
 
   const total = recipients.length;
-  const estimated = formatDuration(total * delaySec);
+  const estimated = formatDuration(total * averageDelaySec(delayMinSec, delayMaxSec));
+
+  function setDelayRange(min: number, max: number) {
+    const next: Partial<MailerConfig> = { delayMinSec: min, delayMaxSec: max };
+    updateMailerConfig(next);
+  }
+
+  function nextDelaySec(): number {
+    if (IS_TEST) return 0;
+    return randomDelaySec(delayMinSec, delayMaxSec);
+  }
 
   async function onConfirm() {
     if (phase === "sending") return;
@@ -91,7 +105,7 @@ export function EmailSender() {
       setProgress((p) => ({ ...p, current: i + 1, pending: Math.max(0, p.pending - 1) }));
       const ok = await sendEmail(r, subject, body);
       setProgress((p) => (ok ? { ...p, sent: p.sent + 1 } : { ...p, failed: p.failed + 1 }));
-      if (i < list.length - 1) await sleep(delaySec * 1000);
+      if (i < list.length - 1) await sleep(nextDelaySec() * 1000);
     }
 
     setPhase("done");
@@ -112,7 +126,7 @@ export function EmailSender() {
         <div>
           <h2 className="text-lg font-semibold text-slate-100">Envío Rápido</h2>
           <p className="mt-1 text-sm text-slate-400">
-            Carga tu CSV, elige una plantilla y envía la campaña.
+            Carga tu CSV, elige una plantilla y envía la campaña con pausas humanas.
           </p>
         </div>
         <button
@@ -156,7 +170,7 @@ export function EmailSender() {
             {total} destinatario{total === 1 ? "" : "s"} listado{total === 1 ? "" : "s"}
           </p>
           <p className="text-xs text-slate-600">
-            Intervalo anti-spam: {delaySec} s · Tiempo estimado: {estimated}
+            Pausa humana aleatoria: {delayMinSec}–{delayMaxSec} s · Tiempo estimado: {estimated}
           </p>
         </div>
         <button
@@ -177,7 +191,12 @@ export function EmailSender() {
       >
         <div className="space-y-5">
           <SenderSettings />
-          <AntiSpam delaySec={delaySec} onDelay={setDelaySec} />
+          <AntiSpam
+            min={delayMinSec}
+            max={delayMaxSec}
+            onChange={setDelayRange}
+            recipients={total}
+          />
         </div>
       </Modal>
 
@@ -185,7 +204,8 @@ export function EmailSender() {
         <SendModal
           mode={phase === "confirm" ? "confirm" : phase === "sending" ? "sending" : "done"}
           total={total}
-          delaySec={delaySec}
+          delayMinSec={delayMinSec}
+          delayMaxSec={delayMaxSec}
           progress={progress}
           onConfirm={onConfirm}
           onCancel={onCancel}
@@ -196,33 +216,81 @@ export function EmailSender() {
   );
 }
 
-function AntiSpam({ delaySec, onDelay }: { delaySec: number; onDelay: (n: number) => void }) {
+function AntiSpam({
+  min,
+  max,
+  onChange,
+  recipients,
+}: {
+  min: number;
+  max: number;
+  onChange: (min: number, max: number) => void;
+  recipients: number;
+}) {
+  const estimated = formatDuration(recipients * averageDelaySec(min, max));
+
+  function setMin(value: number) {
+    onChange(Math.min(value, max), max);
+  }
+
+  function setMax(value: number) {
+    onChange(min, Math.max(value, min));
+  }
+
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 shadow-xl shadow-black/20 backdrop-blur-xl">
-      <h3 className="text-sm font-semibold text-slate-100">Ajustes Anti-Spam</h3>
-      <p className="mt-1 text-xs text-slate-500">
-        Retraso entre envíos para evitar ser marcado como spam.
-      </p>
-      <div className="mt-4 flex items-center gap-4">
-        <input
-          type="range"
-          min={3}
-          max={5}
-          step={1}
-          value={delaySec}
-          onChange={(e) => onDelay(Number(e.target.value))}
-          className="flex-1 accent-emerald-500"
-          aria-label="Retraso entre envíos en segundos"
-        />
-        <span className="w-24 rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-1.5 text-center text-sm text-slate-200">
-          {delaySec} s
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-100">Envío Humano Anti-Spam</h3>
+          <p className="mt-1 text-xs text-slate-500">
+            Pausas aleatorias entre envíos para proteger la reputación del dominio.
+          </p>
+        </div>
+        <span className="shrink-0 rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-1.5 text-center text-xs text-slate-200">
+          {min}–{max} s
         </span>
       </div>
-      <div className="mt-2 flex justify-between text-[11px] text-slate-600">
-        <span>3 s (rápido)</span>
-        <span>4 s (equilibrado)</span>
-        <span>5 s (prudente)</span>
+
+      <div className="mt-4 space-y-4">
+        <div>
+          <div className="mb-1.5 flex items-center justify-between text-[11px] text-slate-500">
+            <span>Pausa mínima</span>
+            <span>{min} s</span>
+          </div>
+          <input
+            type="range"
+            min={10}
+            max={30}
+            step={1}
+            value={min}
+            onChange={(e) => setMin(Number(e.target.value))}
+            className="w-full accent-emerald-500"
+            aria-label="Pausa mínima entre envíos en segundos"
+          />
+        </div>
+        <div>
+          <div className="mb-1.5 flex items-center justify-between text-[11px] text-slate-500">
+            <span>Pausa máxima</span>
+            <span>{max} s</span>
+          </div>
+          <input
+            type="range"
+            min={10}
+            max={30}
+            step={1}
+            value={max}
+            onChange={(e) => setMax(Number(e.target.value))}
+            className="w-full accent-emerald-500"
+            aria-label="Pausa máxima entre envíos en segundos"
+          />
+        </div>
       </div>
+
+      <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
+        Cada correo espera un tiempo distinto dentro del rango para simular comportamiento
+        humano. Tiempo estimado para {recipients} destinatario{recipients === 1 ? "" : "s"}:{" "}
+        <span className="text-slate-300">{estimated}</span>.
+      </p>
     </div>
   );
 }
