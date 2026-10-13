@@ -59,6 +59,20 @@ interface AppState {
   removeRecipient: (id: string) => void;
   clearRecipients: () => void;
   transferSelected: () => TransferResult;
+  /** Añade a la campaña los prospectos con correo válido. Devuelve cuántos entraron. */
+  queueProspects: (p: Prospect[]) => number;
+  /** Agrega prospectos (p. ej. importados) a los resultados sin reemplazar los actuales. */
+  appendProspects: (p: Prospect[]) => number;
+  /** Si está activo, todo prospecto con correo pasa solo a la lista de envío. */
+  autoQueue: boolean;
+  setAutoQueue: (v: boolean) => void;
+  /**
+   * Todos los contactos con correo encontrados en el Buscador (de todas las
+   * búsquedas), para elegirlos desde el Emisor sin exportar ni importar.
+   */
+  library: Prospect[];
+  removeFromLibrary: (emails: string[]) => void;
+  clearLibrary: () => void;
   campaigns: CampaignRecord[];
   addCampaign: (c: CampaignRecord) => void;
   clearCampaigns: () => void;
@@ -84,10 +98,41 @@ const KEYS = {
   campaigns: "b2b.workspace.campaigns.v1",
   searches: "b2b.workspace.searches.v1",
   suppressed: "b2b.workspace.suppressed.v1",
+  autoQueue: "b2b.workspace.autoqueue.v1",
+  library: "b2b.workspace.library.v1",
 } as const;
 
 const MAX_CAMPAIGNS = 30;
 const MAX_SEARCHES = 8;
+const MAX_LIBRARY = 5000;
+
+const emailOf = (p: Pick<Prospect, "correo">) => (p.correo ?? "").trim().toLowerCase();
+
+/** Añade o actualiza en la biblioteca los prospectos con correo enviable. */
+function mergeLibrary(current: Prospect[], incoming: Prospect[]): Prospect[] {
+  const fresh = incoming.filter(isSendableLoose);
+  if (fresh.length === 0) return current;
+  const byEmail = new Map(current.map((p) => [emailOf(p), p]));
+  const added: Prospect[] = [];
+  const now = Date.now();
+  for (const p of fresh) {
+    const key = emailOf(p);
+    const prev = byEmail.get(key);
+    if (prev) byEmail.set(key, { ...prev, ...p, foundAt: prev.foundAt ?? now });
+    else {
+      const item = { ...p, foundAt: p.foundAt ?? now };
+      byEmail.set(key, item);
+      added.push(item);
+    }
+  }
+  const addedKeys = new Set(added.map(emailOf));
+  const rest = current.map((p) => byEmail.get(emailOf(p)) ?? p).filter((p) => !addedKeys.has(emailOf(p)));
+  return [...added, ...rest].slice(0, MAX_LIBRARY);
+}
+
+function isSendableLoose(p: Prospect): boolean {
+  return isValidEmail(p.correo ?? "") && p.emailStatus !== "invalid";
+}
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -113,11 +158,30 @@ export function hasValidEmail(p: Pick<Prospect, "correo">): boolean {
   return isValidEmail(p.correo ?? "");
 }
 
+/** Correo válido y no marcado como inexistente por la validación. */
+export function isSendable(p: Pick<Prospect, "correo" | "emailStatus">): boolean {
+  return hasValidEmail(p) && p.emailStatus !== "invalid";
+}
+
+function prospectKeys(p: Prospect): string[] {
+  const keys = [`id:${p.id}`];
+  const email = (p.correo ?? "").trim().toLowerCase();
+  if (email) keys.push(`mail:${email}`);
+  const site = (p.website ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\/(www\.)?/, "")
+    .replace(/\/.*$/, "");
+  if (site) keys.push(`web:${site}|${(p.empresa ?? "").trim().toLowerCase()}`);
+  return keys;
+}
+
 export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
   const [tab, setTab] = useState<TabId>("dashboard");
   const [dialog, setDialog] = useState<DialogId>(null);
-  const [prospects, setProspects] = useState<Prospect[]>([]);
+  const [prospects, setProspectsState] = useState<Prospect[]>([]);
+  const [library, setLibrary] = useState<Prospect[]>([]);
   const [searchMeta, setSearchMeta] = useState<ExtractionMeta | null>(null);
   const [searchDraft, setDraft] = useState<SearchDraft>({ niche: "", city: "", limit: 25 });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -125,18 +189,24 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [campaigns, setCampaigns] = useState<CampaignRecord[]>([]);
   const [recentSearches, setRecentSearches] = useState<SearchRecord[]>([]);
   const [suppressed, setSuppressed] = useState<string[]>([]);
+  const [autoQueue, setAutoQueueState] = useState(true);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastSeq = useRef(0);
 
   // Restaura el espacio de trabajo guardado tras montar (evita desajustes de hidratación).
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- lectura única de localStorage tras montar */
-    setProspects(load<Prospect[]>(KEYS.prospects, []));
+    const storedProspects = load<Prospect[]>(KEYS.prospects, []);
+    setProspectsState(storedProspects);
+    const storedLibrary = load<Prospect[]>(KEYS.library, []);
+    // Primera vez: la biblioteca arranca con los resultados que ya había.
+    setLibrary(storedLibrary.length ? storedLibrary : mergeLibrary([], storedProspects));
     setSearchMeta(load<ExtractionMeta | null>(KEYS.meta, null));
     setRecipients((current) => (current.length ? current : load<Prospect[]>(KEYS.recipients, [])));
     setCampaigns(load<CampaignRecord[]>(KEYS.campaigns, []));
     setRecentSearches(load<SearchRecord[]>(KEYS.searches, []));
     setSuppressed(load<string[]>(KEYS.suppressed, []));
+    setAutoQueueState(load<boolean>(KEYS.autoQueue, true) !== false);
     setHydrated(true);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
@@ -159,6 +229,58 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (hydrated) save(KEYS.suppressed, suppressed);
   }, [hydrated, suppressed]);
+
+  useEffect(() => {
+    if (hydrated) save(KEYS.autoQueue, autoQueue);
+  }, [hydrated, autoQueue]);
+  useEffect(() => {
+    if (hydrated) save(KEYS.library, library);
+  }, [hydrated, library]);
+
+  const libraryRef = useRef<Prospect[]>([]);
+  useEffect(() => {
+    libraryRef.current = library;
+  }, [library]);
+  const remember = useCallback((list: Prospect[]) => {
+    const next = mergeLibrary(libraryRef.current, list);
+    if (next === libraryRef.current) return;
+    libraryRef.current = next;
+    setLibrary(next);
+  }, []);
+  const removeFromLibrary = useCallback((emails: string[]) => {
+    const drop = new Set(emails.map((e) => e.trim().toLowerCase()));
+    const next = libraryRef.current.filter((p) => !drop.has(emailOf(p)));
+    libraryRef.current = next;
+    setLibrary(next);
+  }, []);
+  const clearLibrary = useCallback(() => {
+    libraryRef.current = [];
+    setLibrary([]);
+  }, []);
+
+  const prospectsRef = useRef<Prospect[]>([]);
+  useEffect(() => {
+    prospectsRef.current = prospects;
+  }, [prospects]);
+
+  const setProspects = useCallback(
+    (list: Prospect[]) => {
+      prospectsRef.current = list;
+      setProspectsState(list);
+      remember(list);
+    },
+    [remember]
+  );
+
+  const autoQueueRef = useRef(true);
+  useEffect(() => {
+    autoQueueRef.current = autoQueue;
+  }, [autoQueue]);
+  const setAutoQueue = useCallback((v: boolean) => {
+    autoQueueRef.current = v;
+    setAutoQueueState(v);
+  }, []);
+
 
   const suppressedSet = useMemo(() => new Set(suppressed), [suppressed]);
   const suppressedRef = useRef<string[]>([]);
@@ -215,32 +337,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   }, []);
   const closeDialog = useCallback(() => setDialog(null), []);
 
-  const updateProspects = useCallback((updates: Record<string, Partial<Prospect>>) => {
-    setProspects((list) => list.map((p) => (updates[p.id] ? { ...p, ...updates[p.id] } : p)));
-    setRecipients((list) => list.map((p) => (updates[p.id] ? { ...p, ...updates[p.id] } : p)));
-  }, []);
-
-  const removeProspects = useCallback((ids: string[]) => {
-    const drop = new Set(ids);
-    setProspects((list) => list.filter((p) => !drop.has(p.id)));
-    setSelectedIds((s) => s.filter((id) => !drop.has(id)));
-  }, []);
-
-  const toggleSelect = useCallback((id: string) => {
-    setSelectedIds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
-  }, []);
-
-  const setSelection = useCallback((ids: string[]) => setSelectedIds(ids), []);
-
-  const selectAll = useCallback(() => {
-    setSelectedIds((prev) => {
-      const all = prospects.map((p) => p.id);
-      return prev.length === all.length && all.length > 0 ? [] : all;
-    });
-  }, [prospects]);
-
-  const clearSelection = useCallback(() => setSelectedIds([]), []);
-
   const recipientsRef = useRef<Prospect[]>([]);
   useEffect(() => {
     recipientsRef.current = recipients;
@@ -259,12 +355,74 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       fresh.push(item);
     }
     if (fresh.length) {
-      const next = [...current, ...fresh];
-      recipientsRef.current = next;
-      setRecipients(next);
+      recipientsRef.current = [...current, ...fresh];
+      // Actualización funcional: conserva otros cambios pendientes de la misma pasada.
+      setRecipients((list) => {
+        const ids = new Set(list.map((x) => x.id));
+        return [...list, ...fresh.filter((x) => !ids.has(x.id))];
+      });
     }
     return fresh.length;
   }, []);
+
+  const queueProspects = useCallback((p: Prospect[]) => addRecipients(p.filter(isSendable)), [addRecipients]);
+
+  const appendProspects = useCallback((p: Prospect[]) => {
+    const current = prospectsRef.current;
+    const seen = new Set(current.flatMap(prospectKeys));
+    const fresh: Prospect[] = [];
+    for (const item of p) {
+      const keys = prospectKeys(item);
+      if (keys.some((k) => seen.has(k))) continue;
+      keys.forEach((k) => seen.add(k));
+      fresh.push(item);
+    }
+    if (fresh.length) {
+      const next = [...fresh, ...current];
+      prospectsRef.current = next;
+      setProspectsState(next);
+      remember(fresh);
+    }
+    return fresh.length;
+  }, [remember]);
+
+  const updateProspects = useCallback(
+    (updates: Record<string, Partial<Prospect>>) => {
+      const patch = (p: Prospect) => (updates[p.id] ? { ...p, ...updates[p.id] } : p);
+      // Prospectos que acaban de conseguir correo (enriquecimiento o sugerido).
+      const gained = autoQueueRef.current
+        ? prospectsRef.current.filter((p) => updates[p.id]?.correo && !hasValidEmail(p)).map(patch)
+        : [];
+      prospectsRef.current = prospectsRef.current.map(patch);
+      recipientsRef.current = recipientsRef.current.map(patch);
+      setProspectsState((list) => list.map(patch));
+      setRecipients((list) => list.map(patch));
+      remember(prospectsRef.current.filter((p) => updates[p.id]));
+      if (gained.length) queueProspects(gained);
+    },
+    [queueProspects, remember]
+  );
+
+  const removeProspects = useCallback((ids: string[]) => {
+    const drop = new Set(ids);
+    setProspectsState((list) => list.filter((p) => !drop.has(p.id)));
+    setSelectedIds((s) => s.filter((id) => !drop.has(id)));
+  }, []);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  }, []);
+
+  const setSelection = useCallback((ids: string[]) => setSelectedIds(ids), []);
+
+  const selectAll = useCallback(() => {
+    setSelectedIds((prev) => {
+      const all = prospects.map((p) => p.id);
+      return prev.length === all.length && all.length > 0 ? [] : all;
+    });
+  }, [prospects]);
+
+  const clearSelection = useCallback(() => setSelectedIds([]), []);
 
   const removeRecipient = useCallback(
     (id: string) => setRecipients((r) => r.filter((x) => x.id !== id)),
@@ -332,6 +490,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       removeRecipient,
       clearRecipients,
       transferSelected,
+      queueProspects,
+      appendProspects,
+      autoQueue,
+      setAutoQueue,
+      library,
+      removeFromLibrary,
+      clearLibrary,
       campaigns,
       addCampaign,
       clearCampaigns,
@@ -353,6 +518,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       openDialog,
       closeDialog,
       prospects,
+      setProspects,
       updateProspects,
       removeProspects,
       searchDraft,
@@ -368,6 +534,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       removeRecipient,
       clearRecipients,
       transferSelected,
+      queueProspects,
+      appendProspects,
+      autoQueue,
+      setAutoQueue,
+      library,
+      removeFromLibrary,
+      clearLibrary,
       campaigns,
       addCampaign,
       clearCampaigns,

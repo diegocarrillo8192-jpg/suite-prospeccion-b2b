@@ -40,7 +40,7 @@ afterEach(() => {
 describe("Emisor de Correos — flujo completo de campaña", () => {
   it("a) carga y parsea el CSV mapeando encabezados automáticamente", async () => {
     const { container } = renderSender();
-    expect(screen.getByText(/Arrastra tu CSV aquí o selecciónalo manualmente/i)).toBeTruthy();
+    expect(screen.getByText(/Arrastra tu base de datos \(Excel o CSV\) aquí/i)).toBeTruthy();
 
     uploadCsv(container);
 

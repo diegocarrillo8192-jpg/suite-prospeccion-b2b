@@ -17,7 +17,7 @@ import {
   Users,
   type LucideIcon,
 } from "lucide-react";
-import { hasValidEmail, useAppState } from "./app-state";
+import { isSendable, useAppState } from "./app-state";
 import { RecipientList } from "./recipient-list";
 import { TemplateEditor } from "./template-editor";
 import { SenderSettings } from "./sender-settings";
@@ -198,7 +198,8 @@ export function EmailSender() {
     }
   }, [draftReady, subject, preheader, body, templateId, unsubscribe]);
 
-  const withEmail = useMemo(() => recipients.filter(hasValidEmail), [recipients]);
+  // Se omiten correos con formato inválido o que la validación marcó como inexistentes.
+  const withEmail = useMemo(() => recipients.filter(isSendable), [recipients]);
   const sendable = useMemo(
     () => withEmail.filter((r) => !suppressedSet.has(r.correo.trim().toLowerCase())),
     [withEmail, suppressedSet]
@@ -403,7 +404,7 @@ export function EmailSender() {
                 ? `${total} destinatario${total === 1 ? "" : "s"} con correo válido${
                     invalidCount + suppressedCount ? ` · ${invalidCount + suppressedCount} se omitirán` : ""
                   }`
-                : "Añade destinatarios desde el Buscador o con un CSV"
+                : "Llegan solos desde el Buscador, o sube tu base de datos"
             }
             collapsed={collapsed.to}
             onToggle={() => toggle("to")}

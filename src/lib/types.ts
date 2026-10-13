@@ -41,6 +41,8 @@ export interface Prospect {
   emails?: string[];
   /** Correo probable (info@dominio con MX activo) cuando el sitio no publica uno. */
   emailGuess?: string;
+  /** Momento (ms) en que el contacto entró a la biblioteca de prospectos. */
+  foundAt?: number;
   social?: SocialLinks;
   emailStatus?: EmailValidationStatus;
   emailStatusLabel?: string;

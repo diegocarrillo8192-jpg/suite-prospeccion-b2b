@@ -9,7 +9,7 @@ Todo funciona **sin API Keys** gracias al motor local gratuito. Google Places y 
 | Sección | Qué hace |
 | --- | --- |
 | **Panel** | Embudo (encontrados → con correo → validados → contactados), primeros pasos, historial de campañas con el detalle por destinatario y búsquedas recientes. |
-| **Buscador** | Nicho + ciudad (o varias ciudades separadas por `;`), catálogo de 150+ nichos, 10 a 100 resultados, rastreo profundo de sitios, filtro de duplicados. Tabla con filtros, orden, acciones masivas, exportación Excel/PDF/CSV y vista en tarjetas en móvil. |
+| **Buscador** | Nicho + ciudad (o varias ciudades separadas por `;`), catálogo de 150+ nichos, 10 a 100 resultados, rastreo profundo de sitios, filtro de duplicados. Tabla con filtros, orden, acciones masivas, exportación Excel/PDF/CSV y vista en tarjetas en móvil. Los prospectos con correo pasan **automáticamente** a la campaña (sin exportar/importar) y puedes **importar tu propia base** (Excel, CSV o lista pegada). |
 | **Emisor de Correos** | Constructor de campaña paso a paso (Para → De → Asunto → Contenido → Envío), 7 plantillas para cualquier nicho, logo de marca, texto de vista previa, revisión de entregabilidad, cuota diaria, prueba a tu correo, envío con pausa/reanudar y registro por destinatario. |
 | **Conectores** | Motor local, Google Places API, Apify y canales de correo (Gmail, SMTP, Resend, SendGrid, Simulado) con botón **Probar** y guía para obtener cada clave. |
 | **Manual de uso** | Guía paso a paso con ejemplos, variables disponibles y preguntas frecuentes. |

@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import {
   AlertTriangle,
   Building2,
+  DatabaseZap,
+  Send,
   LayoutGrid,
   Cloud,
   Cpu,
@@ -16,7 +18,8 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useAppState } from "./app-state";
+import { isSendable, useAppState } from "./app-state";
+import { ContactImportModal } from "./contact-import";
 import { sanitizeText } from "@/lib/sanitize";
 import { ResultsTable } from "./results-table";
 import { EmptyState, PageHeader, Spinner, Toggle } from "./ui";
@@ -124,7 +127,20 @@ export function ProspectSearch() {
     addRecentSearch,
     openDialog,
     notify,
+    recipients,
+    queueProspects,
+    autoQueue,
+    setAutoQueue,
+    setTab,
   } = useAppState();
+  const [importOpen, setImportOpen] = useState(false);
+  const recipientEmails = useMemo(
+    () => new Set(recipients.map((r) => (r.correo ?? "").trim().toLowerCase())),
+    [recipients]
+  );
+  const sendableProspects = useMemo(() => prospects.filter(isSendable), [prospects]);
+  const pendingQueue = sendableProspects.filter((p) => !recipientEmails.has(p.correo.trim().toLowerCase()));
+  const readyCount = sendableProspects.length - pendingQueue.length;
   const providerConfig = useSyncExternalStore(subscribeProviders, getProvidersSnapshot, getServerProvidersSnapshot);
   const historyCount = useSyncExternalStore(subscribeHistory, getHistoryCount, getServerHistoryCount);
 
@@ -235,6 +251,8 @@ export function ProspectSearch() {
         return;
       }
       setProspects(fresh);
+      // Los que ya traen correo quedan listos en el Emisor sin exportar ni importar nada.
+      const queued = autoQueue ? queueProspects(fresh) : 0;
       setSearchMeta(
         firstMeta
           ? { ...firstMeta, cityName: cities.length > 1 ? cities.join(" · ") : firstMeta.cityName }
@@ -244,7 +262,9 @@ export function ProspectSearch() {
       notify(
         "success",
         `${fresh.length} prospectos encontrados`,
-        `${withEmail} con correo${skipped ? ` · ${skipped} duplicados omitidos` : ""}${
+        `${withEmail} con correo${autoQueue ? ` · ${queued} listos para enviar en la campaña` : ""}${
+          skipped ? ` · ${skipped} duplicados omitidos` : ""
+        }${
           cities.length > 1 ? ` · ${cities.length} ciudades` : ""
         }`
       );
@@ -272,9 +292,14 @@ export function ProspectSearch() {
         title="Encuentra empresas para prospectar"
         description="Extracción real de negocios por nicho y ciudad en cualquier país, con correos, WhatsApp, redes sociales y análisis del sitio web."
         actions={
-          <button type="button" onClick={() => openDialog("providers")} className="btn btn-secondary">
-            <KeyRound className="h-4 w-4" /> Proveedores / APIs
-          </button>
+          <>
+            <button type="button" onClick={() => setImportOpen(true)} className="btn btn-secondary">
+              <DatabaseZap className="h-4 w-4" /> Importar base de datos
+            </button>
+            <button type="button" onClick={() => openDialog("providers")} className="btn btn-secondary">
+              <KeyRound className="h-4 w-4" /> Proveedores / APIs
+            </button>
+          </>
         }
       />
 
@@ -405,7 +430,7 @@ export function ProspectSearch() {
           </p>
         )}
 
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
           <Toggle
             checked={deepCrawl}
             onChange={setDeepCrawl}
@@ -417,6 +442,12 @@ export function ProspectSearch() {
             onChange={setSkipDuplicates}
             label="Omitir empresas ya extraídas"
             description={`Evita repetir prospectos de búsquedas anteriores (${historyCount} en historial).`}
+          />
+          <Toggle
+            checked={autoQueue}
+            onChange={setAutoQueue}
+            label="Enviar a la campaña automáticamente"
+            description="Los prospectos con correo quedan listos en el Emisor al terminar la búsqueda o al enriquecerlos. Sin descargar ni subir archivos."
           />
         </div>
 
@@ -456,6 +487,8 @@ export function ProspectSearch() {
           expected={expected}
         />
       )}
+
+      <ContactImportModal open={importOpen} onClose={() => setImportOpen(false)} target="search" />
 
       <NicheCatalog
         open={catalogOpen}
@@ -512,6 +545,36 @@ export function ProspectSearch() {
               {searchMeta.source && <span className="chip">Fuente: {searchMeta.source}</span>}
             </p>
           )}
+          {sendableProspects.length > 0 && (
+            <div className="flex flex-col gap-3 rounded-2xl border border-violet-500/25 bg-gradient-to-r from-violet-500/[0.10] to-cyan-400/[0.05] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="flex items-center gap-2 text-xs text-slate-300">
+                <Send className="h-4 w-4 shrink-0 text-violet-300" />
+                <span>
+                  <b className="text-white">{readyCount}</b> de {sendableProspects.length} prospectos con correo están listos en tu
+                  campaña{pendingQueue.length > 0 ? ` · ${pendingQueue.length} pendientes de añadir` : ""}.
+                </span>
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {pendingQueue.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const added = queueProspects(pendingQueue);
+                      notify("success", `${added} destinatarios añadidos a la campaña`);
+                    }}
+                    className="btn btn-sm btn-secondary"
+                  >
+                    Añadir {pendingQueue.length} a la campaña
+                  </button>
+                )}
+                {readyCount > 0 && (
+                  <button type="button" onClick={() => setTab("sender")} className="btn btn-sm btn-primary">
+                    <Send className="h-3.5 w-3.5" /> Ir a enviar ({recipients.length})
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           <ResultsTable />
         </section>
       )}
@@ -522,6 +585,11 @@ export function ProspectSearch() {
             icon={Search}
             title="Lanza tu primera búsqueda"
             description="Escribe un nicho y una ciudad. En modo gratis no necesitas ninguna API Key; los resultados se guardan en este navegador."
+            action={
+              <button type="button" onClick={() => setImportOpen(true)} className="btn btn-sm btn-secondary">
+                <DatabaseZap className="h-3.5 w-3.5" /> ¿Ya tienes una base? Impórtala
+              </button>
+            }
           />
         </div>
       )}

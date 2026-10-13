@@ -173,12 +173,17 @@ export function Guide() {
     {
       icon: FileUp,
       title: "Prepara los destinatarios",
-      summary: "Transfiere prospectos o carga un CSV.",
+      summary: "Llegan solos desde el Buscador, o sube tu base.",
       body: (
         <p>
-          Selecciona prospectos y pulsa <b>Transferir Lista a Emisor de Correos</b>, o en <b>Campañas</b> arrastra un
-          CSV. Las columnas se detectan solas (nombre, empresa, correo, ciudad, rubro…). Los que no tienen correo válido se
-          omiten automáticamente.
+          Con <b>Enviar a la campaña automáticamente</b> activado (viene así por defecto), cada prospecto con correo que
+          encuentres o enriquezcas queda listo en <b>Campañas</b>: no tienes que descargar ni volver a subir nada. Si prefieres
+          elegir a mano, en Campañas pulsa <b>Cargar del Buscador</b>: verás todos los contactos con correo de todas tus
+          búsquedas, con filtros por rubro y ciudad, y marcas con casillas a quién enviar. ¿Ya
+          tienes tus propios contactos? Pulsa <b>Importar base de datos</b> (en el Buscador) o <b>Subir base</b> (en
+          Campañas): acepta Excel (.xlsx), CSV o una lista pegada desde Google Sheets. Las columnas se detectan solas
+          (nombre, empresa, correo, teléfono, web, ciudad, rubro…); los duplicados se omiten y los contactos sin correo
+          pero con web pasan al Buscador para encontrar su correo con <b>Enriquecer</b>.
         </p>
       ),
       example: (

@@ -1,21 +1,29 @@
 "use client";
 
 import { useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
-import { AlertTriangle, FileUp, Search, UploadCloud, X } from "lucide-react";
-import { hasValidEmail, useAppState } from "./app-state";
-import { parseCsv } from "@/lib/csv";
-import { isValidEmail } from "@/lib/sanitize";
-import type { Prospect } from "@/lib/types";
-
-const SAMPLE_CSV = "nombre,empresa,correo,ciudad,rubro\nAna Pérez,Acme SA,ana@acme.com,Ciudad de Panamá,Software\n";
+import { AlertTriangle, ClipboardPaste, FileUp, Search, UploadCloud, UserPlus, X } from "lucide-react";
+import { hasValidEmail, isSendable, useAppState } from "./app-state";
+import { ProspectPicker } from "./prospect-picker";
+import { ContactImportModal, describeImport, downloadImportTemplate, useContactImport } from "./contact-import";
+import { IMPORT_ACCEPT } from "@/lib/import-contacts";
 
 export function RecipientList() {
-  const { recipients, addRecipients, removeRecipient, setTab, contactedEmails } = useAppState();
+  const { recipients, removeRecipient, setTab, contactedEmails, autoQueue, library, suppressedSet } = useAppState();
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const available = useMemo(() => {
+    const inList = new Set(recipients.map((r) => (r.correo ?? "").trim().toLowerCase()));
+    return library.filter((p) => {
+      const email = p.correo.trim().toLowerCase();
+      return !inList.has(email) && !suppressedSet.has(email);
+    }).length;
+  }, [library, recipients, suppressedSet]);
+  const { importFile } = useContactImport("campaign");
   const fileRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [filter, setFilter] = useState("");
+  const [pasteOpen, setPasteOpen] = useState(false);
 
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -23,57 +31,25 @@ export function RecipientList() {
     return recipients.filter((r) => `${r.nombre} ${r.empresa} ${r.correo} ${r.ciudad}`.toLowerCase().includes(q));
   }, [recipients, filter]);
 
-  function loadFile(file: File) {
-    if (!/\.(csv|txt)$/i.test(file.name) && file.type && !file.type.includes("csv") && !file.type.includes("text")) {
-      setError("El archivo debe ser un CSV (.csv).");
-      setNotice(null);
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const rows = parseCsv(String(reader.result ?? ""));
-        const stamp = Date.now();
-        const prospects: Prospect[] = rows
-          .filter((r) => r.correo && isValidEmail(r.correo))
-          .map((r, i) => ({
-            id: `csv-${stamp}-${i}`,
-            nombre: r.nombre || "",
-            empresa: r.empresa || "Sin empresa",
-            correo: (r.correo ?? "").trim(),
-            telefono: r.telefono || "",
-            whatsapp: r.whatsapp || r.telefono || "",
-            direccion: r.direccion || "",
-            website: r.website || "",
-            ciudad: r.ciudad || "",
-            rubro: r.rubro || "",
-          }));
-
-        if (prospects.length === 0) {
-          setError("No se encontraron correos válidos en el archivo. Asegúrate de tener una columna «correo» o «email».");
-          setNotice(null);
-          return;
-        }
-        const added = addRecipients(prospects);
-        const ignored = rows.length - prospects.length;
-        const dupes = prospects.length - added;
-        setError(null);
-        setNotice(
-          `${added} contacto${added === 1 ? "" : "s"} importado${added === 1 ? "" : "s"} automáticamente desde ${file.name}.` +
-            (dupes > 0 ? ` ${dupes} duplicado${dupes === 1 ? "" : "s"} omitido${dupes === 1 ? "" : "s"}.` : "") +
-            (ignored > 0 ? ` ${ignored} fila${ignored === 1 ? "" : "s"} sin correo válido.` : "")
-        );
-      } catch {
-        setError("No se pudo procesar el archivo CSV.");
+  async function loadFile(file: File) {
+    try {
+      const report = await importFile(file);
+      if (report.queued + report.duplicates === 0 && report.findable === 0) {
+        setError("No se encontraron correos válidos en el archivo. Asegúrate de tener una columna «correo» o «email».");
         setNotice(null);
+        return;
       }
-    };
-    reader.readAsText(file);
+      setError(null);
+      setNotice(describeImport(report, "campaign"));
+    } catch (err) {
+      setError((err as Error).message || "No se pudo procesar el archivo.");
+      setNotice(null);
+    }
   }
 
   function onFile(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (file) loadFile(file);
+    if (file) void loadFile(file);
     e.target.value = "";
   }
 
@@ -81,17 +57,7 @@ export function RecipientList() {
     e.preventDefault();
     setDragging(false);
     const file = e.dataTransfer.files?.[0];
-    if (file) loadFile(file);
-  }
-
-  function downloadSample() {
-    const blob = new Blob(["﻿" + SAMPLE_CSV], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "plantilla-destinatarios.csv";
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    if (file) void loadFile(file);
   }
 
   return (
@@ -111,18 +77,30 @@ export function RecipientList() {
           <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-300">
             <UploadCloud className="h-6 w-6" />
           </span>
-          <p className="mt-3 text-sm text-slate-300">Arrastra tu CSV aquí o selecciónalo manualmente.</p>
-          <p className="mt-1 text-xs text-slate-500">Detectamos automáticamente nombre, empresa, correo y ciudad.</p>
+          <p className="mt-3 text-sm text-slate-300">Arrastra tu base de datos (Excel o CSV) aquí o selecciónala manualmente.</p>
+          <p className="mt-1 text-xs text-slate-500">
+            Detectamos automáticamente nombre, empresa, correo y ciudad.
+            {autoQueue ? " Los prospectos con correo que encuentres en el Buscador también aparecen aquí solos." : ""}
+          </p>
           <div className="mt-5 flex flex-wrap justify-center gap-2">
-            <button type="button" onClick={() => fileRef.current?.click()} className="btn btn-sm btn-primary">
-              <FileUp className="h-3.5 w-3.5" /> Cargar archivo CSV
+            <button type="button" onClick={() => fileRef.current?.click()} className={`btn btn-sm ${library.length > 0 ? "btn-secondary" : "btn-primary"}`}>
+              <FileUp className="h-3.5 w-3.5" /> Subir Excel / CSV
             </button>
-            <button type="button" onClick={() => setTab("search")} className="btn btn-sm btn-secondary">
-              <Search className="h-3.5 w-3.5" /> Buscar prospectos
+            <button type="button" onClick={() => setPasteOpen(true)} className="btn btn-sm btn-secondary">
+              <ClipboardPaste className="h-3.5 w-3.5" /> Pegar lista
             </button>
+            {library.length > 0 ? (
+              <button type="button" onClick={() => setPickerOpen(true)} className="btn btn-sm btn-primary order-first">
+                <UserPlus className="h-3.5 w-3.5" /> Cargar del Buscador ({available})
+              </button>
+            ) : (
+              <button type="button" onClick={() => setTab("search")} className="btn btn-sm btn-secondary">
+                <Search className="h-3.5 w-3.5" /> Buscar prospectos
+              </button>
+            )}
           </div>
-          <button type="button" onClick={downloadSample} className="mt-3 text-[11px] text-slate-500 underline hover:text-slate-300">
-            Descargar plantilla CSV de ejemplo
+          <button type="button" onClick={downloadImportTemplate} className="mt-3 text-[11px] text-slate-500 underline hover:text-slate-300">
+            Descargar plantilla de ejemplo
           </button>
         </div>
       ) : (
@@ -141,14 +119,25 @@ export function RecipientList() {
                   className="input w-40 py-1.5 text-xs"
                 />
               )}
+              <button
+                type="button"
+                onClick={() => setPickerOpen(true)}
+                className="btn btn-sm btn-primary"
+                title="Elegir contactos encontrados en el Buscador"
+              >
+                <UserPlus className="h-3.5 w-3.5" /> Cargar del Buscador{available ? ` (${available})` : ""}
+              </button>
+              <button type="button" onClick={() => setPasteOpen(true)} className="btn btn-sm btn-ghost" title="Pegar correos o una tabla">
+                <ClipboardPaste className="h-3.5 w-3.5" /> Pegar
+              </button>
               <button type="button" onClick={() => fileRef.current?.click()} className="btn btn-sm btn-secondary">
-                + Cargar CSV
+                <FileUp className="h-3.5 w-3.5" /> Subir base
               </button>
             </div>
           </div>
           <ul className="max-h-80 space-y-1.5 overflow-y-auto pr-1">
             {visible.map((r) => {
-              const valid = hasValidEmail(r);
+              const valid = isSendable(r);
               const contacted = valid && contactedEmails.has(r.correo.trim().toLowerCase());
               const initials = (r.empresa || r.nombre || "?").trim().slice(0, 2).toUpperCase();
               return (
@@ -166,7 +155,7 @@ export function RecipientList() {
                       {r.nombre ? `${r.nombre} · ${r.empresa}` : r.empresa}
                     </p>
                     <p className="truncate text-xs text-slate-500">
-                      {valid ? r.correo : "Sin correo válido"}
+                      {valid ? r.correo : hasValidEmail(r) ? `${r.correo} · rebotaría (validación)` : "Sin correo válido"}
                       {r.ciudad ? ` · ${r.ciudad}` : ""}
                     </p>
                   </div>
@@ -187,7 +176,9 @@ export function RecipientList() {
         </div>
       )}
 
-      <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={onFile} className="hidden" />
+      <input ref={fileRef} type="file" accept={IMPORT_ACCEPT} onChange={onFile} className="hidden" />
+      <ProspectPicker open={pickerOpen} onClose={() => setPickerOpen(false)} />
+      <ContactImportModal open={pasteOpen} onClose={() => setPasteOpen(false)} target="campaign" initialMode="paste" />
       {notice && <p className="mt-3 text-xs text-emerald-400">{notice}</p>}
       {error && <p className="mt-3 text-xs text-rose-400">{error}</p>}
     </div>
