@@ -62,6 +62,31 @@ export function RecipientList() {
 
   return (
     <div>
+      {/* Acceso directo a los contactos scrapeados: siempre visible. */}
+      <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-violet-500/30 bg-gradient-to-r from-violet-500/[0.14] to-cyan-400/[0.06] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-500/25 text-violet-200">
+            <Search className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-white">Contactos del Buscador de Prospectos</p>
+            <p className="text-[11px] text-slate-400">
+              {library.length === 0
+                ? "Cuando hagas una búsqueda, los negocios con correo aparecerán aquí para elegirlos."
+                : `${library.length} con correo guardados · ${available} disponibles para añadir`}
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setPickerOpen(true)}
+          className="btn btn-primary shrink-0"
+          title="Elegir contactos encontrados en el Buscador"
+        >
+          <UserPlus className="h-4 w-4" /> Cargar del Buscador{available ? ` (${available})` : ""}
+        </button>
+      </div>
+
       {recipients.length === 0 ? (
         <div
           onDragOver={(e) => {
@@ -89,11 +114,7 @@ export function RecipientList() {
             <button type="button" onClick={() => setPasteOpen(true)} className="btn btn-sm btn-secondary">
               <ClipboardPaste className="h-3.5 w-3.5" /> Pegar lista
             </button>
-            {library.length > 0 ? (
-              <button type="button" onClick={() => setPickerOpen(true)} className="btn btn-sm btn-primary order-first">
-                <UserPlus className="h-3.5 w-3.5" /> Cargar del Buscador ({available})
-              </button>
-            ) : (
+            {library.length === 0 && (
               <button type="button" onClick={() => setTab("search")} className="btn btn-sm btn-secondary">
                 <Search className="h-3.5 w-3.5" /> Buscar prospectos
               </button>
@@ -119,14 +140,6 @@ export function RecipientList() {
                   className="input w-40 py-1.5 text-xs"
                 />
               )}
-              <button
-                type="button"
-                onClick={() => setPickerOpen(true)}
-                className="btn btn-sm btn-primary"
-                title="Elegir contactos encontrados en el Buscador"
-              >
-                <UserPlus className="h-3.5 w-3.5" /> Cargar del Buscador{available ? ` (${available})` : ""}
-              </button>
               <button type="button" onClick={() => setPasteOpen(true)} className="btn btn-sm btn-ghost" title="Pegar correos o una tabla">
                 <ClipboardPaste className="h-3.5 w-3.5" /> Pegar
               </button>
