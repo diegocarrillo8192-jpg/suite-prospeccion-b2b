@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { scanWebsite, rankEmails } from "@/lib/enricher";
+import { guessEmail, scanWebsite, rankEmails } from "@/lib/enricher";
 import { pickBestEmail, validateEmail } from "@/lib/validators/email-validator";
 import {
   ContactsError,
@@ -10,7 +10,7 @@ import {
 import { normalizeWebsite } from "@/lib/engines/shared";
 import { emptyTechStack } from "@/lib/tech-detector";
 import type { SocialLinks } from "@/lib/types";
-import { rateLimit } from "@/lib/rate-limit";
+import { limitRequest } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,21 +50,8 @@ function readItem(value: unknown): EmailItem | null {
 }
 
 export async function POST(request: NextRequest) {
-  const forwarded = request.headers.get("x-forwarded-for") ?? "";
-  const ip = forwarded.split(",")[0]?.trim() || "local";
-
-  const rl = rateLimit(ip, { capacity: 12, refillAmount: 1, refillPerMs: 1200 });
-  if (!rl.ok) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "rate_limited",
-        message: "Demasiadas extracciones seguidas. Espera un momento.",
-        retryAfter: rl.retryAfter,
-      },
-      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
-    );
-  }
+  const limited = limitRequest(request, "enrich-emails", "Demasiadas extracciones seguidas. Espera un momento.", { capacity: 12, refillAmount: 1, refillPerMs: 1200 });
+  if (limited) return limited;
 
   let payload: unknown;
   try {
@@ -144,11 +131,13 @@ export async function POST(request: NextRequest) {
       const ranked = rankEmails(emails, safeWebsite ? hostOf(safeWebsite) : "");
       const bestEmail = pickBestEmail(ranked);
       const validation = bestEmail ? await validateEmail(bestEmail) : null;
+      const emailGuess = !bestEmail && safeWebsite ? await guessEmail(safeWebsite) : "";
 
       return {
         id: item.id,
         emails: ranked,
         bestEmail,
+        emailGuess,
         social,
         emailStatus: validation?.status ?? "unknown",
         emailStatusLabel: validation?.label ?? "Sin verificar",

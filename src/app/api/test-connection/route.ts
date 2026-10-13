@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isValidEmail } from "@/lib/sanitize";
-import { rateLimit } from "@/lib/rate-limit";
+import { limitRequest } from "@/lib/rate-limit";
 import { parseProviderConfig } from "@/lib/email-providers";
 import { verifyConnection } from "@/lib/server-mailer";
 
@@ -8,21 +8,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
-  const forwarded = request.headers.get("x-forwarded-for") ?? "";
-  const ip = forwarded.split(",")[0]?.trim() || "local";
-
-  const rl = rateLimit(ip, { capacity: 6, refillAmount: 1, refillPerMs: 3000 });
-  if (!rl.ok) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "rate_limited",
-        message: "Demasiadas pruebas seguidas. Espera un momento.",
-        retryAfter: rl.retryAfter,
-      },
-      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
-    );
-  }
+  const limited = limitRequest(request, "test-connection", "Demasiadas pruebas seguidas. Espera un momento.", { capacity: 6, refillAmount: 1, refillPerMs: 3000 });
+  if (limited) return limited;
 
   let payload: unknown;
   try {

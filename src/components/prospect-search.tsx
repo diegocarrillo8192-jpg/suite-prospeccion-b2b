@@ -1,10 +1,27 @@
 "use client";
 
-import { useState, useSyncExternalStore, type FormEvent } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import {
+  AlertTriangle,
+  Building2,
+  LayoutGrid,
+  Cloud,
+  Cpu,
+  History,
+  KeyRound,
+  MapPin,
+  RotateCcw,
+  Search,
+  SearchX,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { useAppState } from "./app-state";
 import { sanitizeText } from "@/lib/sanitize";
 import { ResultsTable } from "./results-table";
-import { downloadCsv } from "@/lib/csv";
+import { EmptyState, PageHeader, Spinner, Toggle } from "./ui";
+import { Modal } from "./modal";
+import { ALL_NICHES, NICHE_CATALOG } from "@/lib/niches";
 import {
   filterDuplicates,
   rememberProspects,
@@ -28,6 +45,44 @@ import {
 
 const LIMITS = [10, 25, 50, 100];
 
+const NICHE_SUGGESTIONS = [
+  "Restaurantes",
+  "Clínicas dentales",
+  "Abogados",
+  "Inmobiliarias",
+  "Gimnasios",
+  "Talleres mecánicos",
+  "Salones de belleza",
+  "Hoteles",
+  "Contadores",
+  "Veterinarias",
+  "Constructoras",
+  "Agencias de viajes",
+];
+
+const CITY_SUGGESTIONS = [
+  "Ciudad de Panamá",
+  "David, Chiriquí",
+  "Colón, Panamá",
+  "Bogotá",
+  "Ciudad de México",
+  "Madrid",
+  "Miami",
+  "Buenos Aires",
+  "Lima",
+  "Santiago de Chile",
+];
+
+const STAGES = [
+  "Ubicando la ciudad en el mapa…",
+  "Consultando Google Maps y OpenStreetMap…",
+  "Leyendo fichas de negocios…",
+  "Visitando sitios web para extraer correos…",
+  "Detectando redes sociales y WhatsApp…",
+  "Validando dominios de correo (MX)…",
+  "Ordenando y limpiando resultados…",
+];
+
 type SearchOutcome =
   | { ok: true; prospects: Prospect[]; meta?: ExtractionMeta }
   | { ok: false; message: string };
@@ -40,473 +95,585 @@ interface SearchRequest {
   apifyToken: string;
   apifyActor: string;
   googleKey: string;
+  deepCrawl: boolean;
 }
 
-async function requestProspects(params: SearchRequest): Promise<SearchOutcome> {
+async function requestProspects(params: SearchRequest, signal: AbortSignal): Promise<SearchOutcome> {
   const res = await fetch("/api/prospect", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
+    signal,
   });
-  const data = await res.json();
+  const data = await res.json().catch(() => null);
   if (!res.ok || data?.success !== true) {
     return { ok: false, message: data?.message ?? "No se pudieron obtener resultados." };
   }
   return { ok: true, prospects: data.prospects ?? [], meta: data.meta };
 }
 
-function engineHint(engine: EngineId, apifyReady: boolean, googleReady: boolean): string {
-  if (engine === "apify") {
-    return apifyReady
-      ? "Modo API: usará tu actor de Google Maps en la nube de Apify."
-      : "Modo API sin clave: se activará automáticamente el scraping local sin costo.";
-  }
-  if (engine === "google") {
-    return googleReady
-      ? "Modo API: usará la API oficial de Google Places (requiere facturación activa)."
-      : "Modo API sin clave: se activará automáticamente el scraping local sin costo.";
-  }
-  return "Modo Gratis: scraping local con Playwright (Google Maps) + OpenStreetMap. Sin API Key ni créditos. Extrae email, WhatsApp y redes de cada sitio web.";
-}
-
-function useProspectSearch() {
-  const { prospects, setProspects, selectedIds, transferSelected, clearSelection } = useAppState();
-  const providerConfig = useSyncExternalStore(
-    subscribeProviders,
-    getProvidersSnapshot,
-    getServerProvidersSnapshot
-  );
-  const [niche, setNiche] = useState("");
-  const [city, setCity] = useState("");
-  const [limit, setLimit] = useState(25);
-  const [loading, setLoading] = useState(false);
-  const [searched, setSearched] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [skippedCount, setSkippedCount] = useState(0);
-  const [meta, setMeta] = useState<ExtractionMeta | null>(null);
+export function ProspectSearch() {
+  const {
+    prospects,
+    setProspects,
+    clearSelection,
+    searchDraft,
+    setSearchDraft,
+    searchMeta,
+    setSearchMeta,
+    addRecentSearch,
+    openDialog,
+    notify,
+  } = useAppState();
+  const providerConfig = useSyncExternalStore(subscribeProviders, getProvidersSnapshot, getServerProvidersSnapshot);
   const historyCount = useSyncExternalStore(subscribeHistory, getHistoryCount, getServerHistoryCount);
 
+  const [loading, setLoading] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [emptyInfo, setEmptyInfo] = useState<{ skipped: number } | null>(null);
+  const [skipDuplicates, setSkipDuplicates] = useState(true);
+  const [deepCrawl, setDeepCrawl] = useState(true);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [cityStep, setCityStep] = useState<{ index: number; total: number; city: string } | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const { niche, city, limit } = searchDraft;
   const engine = providerConfig.engine;
   const apiMode = isApiMode(engine);
   const apiReady = hasAnyApiKey(providerConfig);
-  const apiFallback = preferredApiEngine(providerConfig);
   const apifyReady = providerConfig.apifyToken.trim().length > 0;
   const googleReady = providerConfig.googleKey.trim().length > 0;
+  const engineHasKey = engine === "apify" ? apifyReady : engine === "google" ? googleReady : true;
+
+  useEffect(() => {
+    if (!loading) return;
+    const started = Date.now();
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 500);
+    return () => clearInterval(t);
+  }, [loading]);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   function setEngine(next: EngineId) {
     saveProviderConfig({ ...providerConfig, engine: next });
   }
 
-  async function onSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  function cancelSearch() {
+    abortRef.current?.abort();
+  }
+
+  async function onSubmit(e?: FormEvent<HTMLFormElement>) {
+    e?.preventDefault();
+    if (loading) return;
     const n = sanitizeText(niche);
     const c = sanitizeText(city);
     if (!c) {
       setError("Indica una ubicación / ciudad para buscar.");
-      setSearched(true);
       return;
     }
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
-    setSearched(true);
+    setElapsed(0);
     setError(null);
-    setMeta(null);
+    setEmptyInfo(null);
     clearSelection();
 
+    const cities = c
+      .split(/[;\n]+/)
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .slice(0, 5);
+
     try {
-      const result = await requestProspects({
-        niche: n,
-        city: c,
-        limit,
-        engine,
-        apifyToken: providerConfig.apifyToken,
-        apifyActor: providerConfig.apifyActor,
-        googleKey: providerConfig.googleKey,
-      });
-      if (!result.ok) {
-        setProspects([]);
-        setSkippedCount(0);
-        setError(result.message);
+      const merged: Prospect[] = [];
+      const seenIds = new Set<string>();
+      let firstMeta: ExtractionMeta | undefined;
+      const warnings: string[] = [];
+      let lastError = "";
+
+      for (let i = 0; i < cities.length; i++) {
+        if (controller.signal.aborted) break;
+        setCityStep(cities.length > 1 ? { index: i + 1, total: cities.length, city: cities[i] } : null);
+        setElapsed(0);
+        const result = await requestProspects(
+          {
+            niche: n,
+            city: cities[i],
+            limit,
+            engine,
+            apifyToken: providerConfig.apifyToken,
+            apifyActor: providerConfig.apifyActor,
+            googleKey: providerConfig.googleKey,
+            deepCrawl,
+          },
+          controller.signal
+        );
+        if (!result.ok) {
+          lastError = result.message;
+          continue;
+        }
+        if (!firstMeta) firstMeta = result.meta;
+        if (result.meta?.warning) warnings.push(result.meta.warning);
+        for (const p of result.prospects) {
+          if (seenIds.has(p.id)) continue;
+          seenIds.add(p.id);
+          merged.push(p);
+        }
+      }
+
+      if (merged.length === 0 && lastError) {
+        setError(lastError);
         return;
       }
-      const { fresh, skipped } = filterDuplicates(result.prospects);
+      const { fresh, skipped } = skipDuplicates ? filterDuplicates(merged) : { fresh: merged, skipped: 0 };
       rememberProspects(fresh);
+      addRecentSearch({ niche: n, city: cities.join("; "), count: fresh.length, at: Date.now() });
+      if (fresh.length === 0) {
+        setEmptyInfo({ skipped });
+        return;
+      }
       setProspects(fresh);
-      setSkippedCount(skipped);
-      setMeta(result.meta ?? null);
-    } catch {
-      setProspects([]);
-      setSkippedCount(0);
-      setError("Error de conexión al buscar prospectos.");
+      setSearchMeta(
+        firstMeta
+          ? { ...firstMeta, cityName: cities.length > 1 ? cities.join(" · ") : firstMeta.cityName }
+          : null
+      );
+      const withEmail = fresh.filter((p) => p.correo && p.correo !== "No disponible").length;
+      notify(
+        "success",
+        `${fresh.length} prospectos encontrados`,
+        `${withEmail} con correo${skipped ? ` · ${skipped} duplicados omitidos` : ""}${
+          cities.length > 1 ? ` · ${cities.length} ciudades` : ""
+        }`
+      );
+      if (warnings.length) notify("info", "Aviso del proveedor", warnings[0]);
+    } catch (err) {
+      if ((err as Error)?.name === "AbortError") {
+        notify("info", "Búsqueda cancelada");
+      } else {
+        setError("Error de conexión al buscar prospectos. Revisa tu conexión e intenta de nuevo.");
+      }
     } finally {
       setLoading(false);
+      setCityStep(null);
+      abortRef.current = null;
     }
   }
 
-  return {
-    prospects,
-    setProspects,
-    selectedIds,
-    transferSelected,
-    niche,
-    setNiche,
-    city,
-    setCity,
-    limit,
-    setLimit,
-    loading,
-    searched,
-    error,
-    skippedCount,
-    meta,
-    historyCount,
-    engine,
-    apiMode,
-    apiReady,
-    apiFallback,
-    apifyReady,
-    googleReady,
-    setEngine,
-    onSubmit,
-    onClearHistory: clearHistory,
-  };
-}
-
-export function ProspectSearch({ onOpenSettings }: { onOpenSettings: () => void }) {
-  const s = useProspectSearch();
-  const showError = Boolean(s.error) && !s.loading;
-  const showSkipped = s.skippedCount > 0 && !s.loading;
-  const showEmpty = !s.loading && s.searched && !s.error && s.prospects.length === 0;
-  const showResults = !s.loading && s.prospects.length > 0;
+  const stage = STAGES[Math.min(STAGES.length - 1, Math.floor(elapsed / 6))];
+  const expected = deepCrawl ? Math.round(18 + limit * 0.45) : Math.round(12 + limit * 0.15);
 
   return (
     <div className="space-y-6">
-      <SearchForm
-        niche={s.niche}
-        city={s.city}
-        limit={s.limit}
-        engine={s.engine}
-        apiMode={s.apiMode}
-        apiReady={s.apiReady}
-        apiFallback={s.apiFallback}
-        apifyReady={s.apifyReady}
-        googleReady={s.googleReady}
-        loading={s.loading}
-        historyCount={s.historyCount}
-        onNiche={s.setNiche}
-        onCity={s.setCity}
-        onLimit={s.setLimit}
-        onEngine={s.setEngine}
-        onSubmit={s.onSubmit}
-        onClearHistory={s.onClearHistory}
-        onOpenSettings={onOpenSettings}
+      <PageHeader
+        eyebrow="Buscador"
+        title="Encuentra empresas para prospectar"
+        description="Extracción real de negocios por nicho y ciudad en cualquier país, con correos, WhatsApp, redes sociales y análisis del sitio web."
+        actions={
+          <button type="button" onClick={() => openDialog("providers")} className="btn btn-secondary">
+            <KeyRound className="h-4 w-4" /> Proveedores / APIs
+          </button>
+        }
       />
 
-      {s.loading && <SkeletonTable />}
-
-      {showError && <ErrorNotice message={s.error ?? ""} />}
-
-      {showSkipped && <SkippedNotice count={s.skippedCount} />}
-
-      {showEmpty && <EmptyState />}
-
-      {showResults && (
-        <ResultsSection
-          prospects={s.prospects}
-          selectedCount={s.selectedIds.length}
-          meta={s.meta}
-          onExport={() => downloadCsv(s.prospects)}
-          onTransfer={s.transferSelected}
-        />
-      )}
-    </div>
-  );
-}
-
-function SearchForm({
-  niche,
-  city,
-  limit,
-  engine,
-  apiMode,
-  apiReady,
-  apiFallback,
-  apifyReady,
-  googleReady,
-  loading,
-  historyCount,
-  onNiche,
-  onCity,
-  onLimit,
-  onEngine,
-  onSubmit,
-  onClearHistory,
-  onOpenSettings,
-}: {
-  niche: string;
-  city: string;
-  limit: number;
-  engine: EngineId;
-  apiMode: boolean;
-  apiReady: boolean;
-  apiFallback: EngineId;
-  apifyReady: boolean;
-  googleReady: boolean;
-  loading: boolean;
-  historyCount: number;
-  onNiche: (v: string) => void;
-  onCity: (v: string) => void;
-  onLimit: (n: number) => void;
-  onEngine: (e: EngineId) => void;
-  onSubmit: (e: FormEvent<HTMLFormElement>) => void;
-  onClearHistory: () => void;
-  onOpenSettings: () => void;
-}) {
-  return (
-    <form
-      onSubmit={onSubmit}
-      className="animate-fade-up rounded-2xl border border-white/10 bg-white/[0.03] p-6 shadow-xl shadow-black/20 backdrop-blur-xl"
-    >
-      <h2 className="text-lg font-semibold text-slate-100">Buscador de Prospectos</h2>
-      <p className="mt-1 text-sm text-slate-400">
-        Extracción real de empresas según nicho y ubicación (cualquier país).
-      </p>
-
-      <div className="mt-5 grid gap-4 sm:grid-cols-2">
-        <Field
-          label="Nicho / Rubro"
-          value={niche}
-          onChange={onNiche}
-          placeholder="Ej: Restaurantes, Software, Clínicas…"
-        />
-        <Field
-          label="Ubicación / Ciudad"
-          value={city}
-          onChange={onCity}
-          placeholder="Ej: Panamá, Bogotá, CDMX, Miami…"
-        />
-      </div>
-
-      <div className="mt-4">
-        <span className="mb-1.5 block text-xs font-medium text-slate-400">Modo de búsqueda</span>
-        <div className="grid gap-2 sm:grid-cols-2">
-          <button
-            type="button"
-            onClick={() => onEngine("free")}
-            className={`rounded-xl border px-4 py-3 text-left transition ${
-              apiMode
-                ? "border-slate-700 text-slate-400 hover:bg-slate-800/60"
-                : "border-sky-500/50 bg-sky-500/10 text-sky-200"
-            }`}
-          >
-            <span className="block text-sm font-semibold">Modo Gratis (Scraping Local)</span>
-            <span className="mt-0.5 block text-[11px] opacity-80">
-              Playwright · Sin créditos ni claves
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onEngine(apiFallback === "free" ? "apify" : apiFallback)}
-            className={`rounded-xl border px-4 py-3 text-left transition ${
-              apiMode
-                ? "border-sky-500/50 bg-sky-500/10 text-sky-200"
-                : "border-slate-700 text-slate-400 hover:bg-slate-800/60"
-            }`}
-          >
-            <span className="block text-sm font-semibold">Modo API Key</span>
-            <span className="mt-0.5 block text-[11px] opacity-80">
-              {apiReady ? "Apify / Google Places" : "Sin clave · usa Ajustes"}
-            </span>
-          </button>
+      <form onSubmit={onSubmit} className="card card-pad animate-fade-up">
+        <div className="grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
+          <div>
+            <label htmlFor="search-niche" className="label">
+              Nicho / Rubro
+            </label>
+            <div className="relative">
+              <Building2 className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-slate-500" />
+              <input
+                id="search-niche"
+                value={niche}
+                onChange={(e) => setSearchDraft({ niche: e.target.value })}
+                placeholder="Ej: Restaurantes, Clínicas dentales…"
+                list="niche-suggestions"
+                className="input pl-10"
+                maxLength={60}
+              />
+              <datalist id="niche-suggestions">
+                {ALL_NICHES.map((s) => (
+                  <option key={s} value={s} />
+                ))}
+              </datalist>
+            </div>
+          </div>
+          <div>
+            <label htmlFor="search-city" className="label">
+              Ubicación / Ciudad
+            </label>
+            <div className="relative">
+              <MapPin className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-slate-500" />
+              <input
+                id="search-city"
+                value={city}
+                onChange={(e) => setSearchDraft({ city: e.target.value })}
+                placeholder="Ej: Ciudad de Panamá; Colón; David"
+                list="city-suggestions"
+                className="input pl-10"
+                maxLength={80}
+              />
+              <p className="mt-1 text-[10px] text-slate-500">Varias ciudades: sepáralas con punto y coma (;) · máx. 5</p>
+              <datalist id="city-suggestions">
+                {CITY_SUGGESTIONS.map((s) => (
+                  <option key={s} value={s} />
+                ))}
+              </datalist>
+            </div>
+          </div>
+          <div>
+            <span className="label">Cantidad</span>
+            <div role="radiogroup" aria-label="Cantidad de prospectos" className="flex rounded-xl border border-white/10 bg-slate-950/50 p-1">
+              {LIMITS.map((l) => (
+                <button
+                  key={l}
+                  type="button"
+                  role="radio"
+                  aria-checked={limit === l}
+                  onClick={() => setSearchDraft({ limit: l })}
+                  className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-semibold tabular-nums transition lg:flex-none ${
+                    limit === l ? "bg-violet-500/25 text-white ring-1 ring-violet-400/30" : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
-      </div>
 
-      {apiMode && (
-        <label className="mt-3 block">
-          <span className="mb-1.5 block text-xs font-medium text-slate-400">Proveedor API</span>
-          <select
-            value={engine}
-            onChange={(e) => onEngine(e.target.value as EngineId)}
-            className="w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3.5 py-2.5 text-sm text-slate-100 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
-          >
-            <option value="apify">Apify Cloud API{apifyReady ? "" : " — sin API Key"}</option>
-            <option value="google">Google Places API{googleReady ? "" : " — sin API Key"}</option>
-          </select>
-        </label>
-      )}
-
-      <div className="mt-4 grid gap-4 sm:grid-cols-[auto_auto]">
-        <label className="block">
-          <span className="mb-1.5 block text-xs font-medium text-slate-400">Cantidad</span>
-          <select
-            value={limit}
-            onChange={(e) => onLimit(Number(e.target.value))}
-            className="w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3.5 py-2.5 text-sm text-slate-100 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
-          >
-            {LIMITS.map((l) => (
-              <option key={l} value={l}>
-                {l} prospectos
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className="flex items-end">
-          <button
-            type="submit"
-            disabled={loading}
-            className="h-[42px] rounded-xl bg-sky-500 px-6 text-sm font-semibold text-white transition hover:bg-sky-400 disabled:opacity-60"
-          >
-            {loading ? "Buscando…" : "Buscar Prospectos"}
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <button type="button" onClick={() => setCatalogOpen(true)} className="chip border-violet-400/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20">
+            <LayoutGrid className="h-3 w-3" /> Explorar {ALL_NICHES.length}+ nichos
           </button>
+          <span className="mx-1 text-[11px] text-slate-500">Populares:</span>
+          {NICHE_SUGGESTIONS.slice(0, 6).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setSearchDraft({ niche: s })}
+              className={`chip transition hover:border-violet-400/40 hover:text-white ${
+                niche === s ? "border-violet-400/50 bg-violet-500/15 text-white" : ""
+              }`}
+            >
+              {s}
+            </button>
+          ))}
         </div>
-      </div>
 
-      {!apiMode && (
-        <p className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2 text-xs text-emerald-300">
-          Modo Gratis activo: no requiere créditos ni claves de API. Scraping local de Google Maps
-          con Playwright + extracción profunda de correos, WhatsApp y redes sociales de cada sitio
-          web.
-        </p>
-      )}
-
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-slate-500">{engineHint(engine, apifyReady, googleReady)}</p>
-        <button
-          type="button"
-          onClick={onOpenSettings}
-          className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:bg-slate-800 hover:text-slate-100"
-        >
-          Configurar Proveedores / APIs
-        </button>
-      </div>
-
-      {historyCount > 0 && (
-        <div className="mt-4 flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-2">
-          <p className="text-xs text-slate-500">
-            Memoria de prospección activa · {historyCount} empresas en el historial.
-          </p>
-          <button
-            type="button"
-            onClick={onClearHistory}
-            className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-400 transition hover:bg-slate-800 hover:text-slate-200"
-          >
-            Limpiar Historial de Duplicados
-          </button>
-        </div>
-      )}
-    </form>
-  );
-}
-
-function ErrorNotice({ message }: { message: string }) {
-  return (
-    <div className="rounded-2xl border border-rose-900/60 bg-rose-950/20 p-6 text-center text-sm text-rose-300">
-      {message}
-    </div>
-  );
-}
-
-function SkippedNotice({ count }: { count: number }) {
-  return (
-    <div className="flex items-center gap-2 rounded-xl border border-amber-900/50 bg-amber-950/20 px-4 py-2.5 text-sm text-amber-300">
-      <span className="text-base">ℹ</span>
-      Se omitieron {count} prospecto{count === 1 ? "" : "s"} ya extraído
-      {count === 1 ? "" : "s"} previamente.
-    </div>
-  );
-}
-
-function EmptyState() {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-10 text-center text-slate-400 shadow-xl shadow-black/20 backdrop-blur-xl">
-      No se encontraron resultados nuevos.
-    </div>
-  );
-}
-
-function ResultsSection({
-  prospects,
-  selectedCount,
-  meta,
-  onExport,
-  onTransfer,
-}: {
-  prospects: Prospect[];
-  selectedCount: number;
-  meta: ExtractionMeta | null;
-  onExport: () => void;
-  onTransfer: () => void;
-}) {
-  return (
-    <div className="animate-fade-up">
-      {meta && (
-        <p className="mb-3 text-xs text-slate-500">
-          {prospects.length} resultado{prospects.length === 1 ? "" : "s"} real
-          {prospects.length === 1 ? "" : "es"} en {meta.cityName}, {meta.countryName} · Fuente:{" "}
-          {meta.source}
-        </p>
-      )}
-      <ResultsTable />
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-slate-400">
-          {selectedCount} de {prospects.length} seleccionados
-        </p>
-        <div className="flex flex-wrap gap-3">
-          <button
-            onClick={onExport}
-            className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-800"
-          >
-            Exportar CSV
-          </button>
-          <button
-            onClick={onTransfer}
-            disabled={selectedCount === 0}
-            className="rounded-xl bg-indigo-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-400 disabled:opacity-50"
-          >
-            Transferir Lista a Emisor de Correos →
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1.5 block text-xs font-medium text-slate-400">{label}</span>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="w-full rounded-xl border border-slate-700 bg-slate-900/60 px-3.5 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
-      />
-    </label>
-  );
-}
-
-function SkeletonTable() {
-  return (
-    <div className="animate-fade-in overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] shadow-xl shadow-black/20 backdrop-blur-xl">
-      <div className="space-y-3 p-6">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div
-            key={i}
-            className="h-4 animate-pulse rounded bg-slate-800/70"
-            style={{ width: `${80 - (i % 4) * 12}%` }}
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          <EngineCard
+            active={engine === "free"}
+            icon={Cpu}
+            title="Modo Gratis"
+            subtitle="Scraping local · Google Maps + OSM"
+            badge="Sin API Key"
+            onClick={() => setEngine("free")}
           />
+          <EngineCard
+            active={engine === "google"}
+            icon={MapPin}
+            title="Google Places API"
+            subtitle="Datos oficiales de Google"
+            badge={googleReady ? "Configurado" : "Requiere clave"}
+            warn={!googleReady}
+            onClick={() => (googleReady ? setEngine("google") : openDialog("providers"))}
+          />
+          <EngineCard
+            active={engine === "apify"}
+            icon={Cloud}
+            title="Apify Cloud"
+            subtitle="Scraper masivo en la nube"
+            badge={apifyReady ? "Configurado" : "Requiere clave"}
+            warn={!apifyReady}
+            onClick={() => (apifyReady ? setEngine("apify") : openDialog("providers"))}
+          />
+        </div>
+        {apiMode && !engineHasKey && (
+          <p className="mt-3 flex items-center gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-200">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            Este proveedor no tiene API Key: se usará el scraping local gratuito como respaldo.
+            {apiReady && (
+              <button type="button" onClick={() => setEngine(preferredApiEngine(providerConfig))} className="underline">
+                Usar el proveedor configurado
+              </button>
+            )}
+          </p>
+        )}
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <Toggle
+            checked={deepCrawl}
+            onChange={setDeepCrawl}
+            label="Rastreo profundo de sitios web"
+            description="Visita la web de cada negocio para extraer correos, redes y WhatsApp. Más lento, pero mucho más completo."
+          />
+          <Toggle
+            checked={skipDuplicates}
+            onChange={setSkipDuplicates}
+            label="Omitir empresas ya extraídas"
+            description={`Evita repetir prospectos de búsquedas anteriores (${historyCount} en historial).`}
+          />
+        </div>
+
+        <div className="mt-5 flex flex-col-reverse gap-3 border-t border-white/[0.06] pt-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3 text-xs text-slate-500">
+            {historyCount > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm("¿Limpiar el historial de duplicados? Las próximas búsquedas podrán repetir empresas.")) {
+                    clearHistory();
+                    notify("success", "Historial de duplicados limpiado");
+                  }
+                }}
+                className="btn btn-sm btn-ghost"
+              >
+                <History className="h-3.5 w-3.5" /> Limpiar historial ({historyCount})
+              </button>
+            )}
+          </div>
+          {loading ? (
+            <button type="button" onClick={cancelSearch} className="btn btn-secondary">
+              <X className="h-4 w-4" /> Cancelar búsqueda
+            </button>
+          ) : (
+            <button type="submit" className="btn btn-primary px-8">
+              <Search className="h-4 w-4" /> Buscar Prospectos
+            </button>
+          )}
+        </div>
+      </form>
+
+      {loading && (
+        <SearchProgress
+          stage={cityStep ? `Ciudad ${cityStep.index} de ${cityStep.total}: ${cityStep.city} · ${stage}` : stage}
+          elapsed={elapsed}
+          expected={expected}
+        />
+      )}
+
+      <NicheCatalog
+        open={catalogOpen}
+        onClose={() => setCatalogOpen(false)}
+        onPick={(value) => {
+          setSearchDraft({ niche: value });
+          setCatalogOpen(false);
+        }}
+      />
+
+      {!loading && error && (
+        <div role="alert" className="card animate-fade-up flex flex-col items-center gap-3 border-rose-500/25 bg-rose-500/[0.06] p-6 text-center">
+          <AlertTriangle className="h-6 w-6 text-rose-400" />
+          <p className="text-sm text-rose-200">{error}</p>
+          <button type="button" onClick={() => onSubmit()} className="btn btn-sm btn-secondary">
+            <RotateCcw className="h-3.5 w-3.5" /> Reintentar
+          </button>
+        </div>
+      )}
+
+      {!loading && emptyInfo && (
+        <div className="card animate-fade-up">
+          <EmptyState
+            icon={SearchX}
+            title="No se encontraron resultados nuevos"
+            description={
+              emptyInfo.skipped > 0
+                ? `Todos los resultados (${emptyInfo.skipped}) ya estaban en tu historial. Desactiva «Omitir empresas ya extraídas» o prueba otro nicho / zona.`
+                : "Prueba con un nicho más general, otra ciudad cercana o el nombre del país."
+            }
+            action={
+              emptyInfo.skipped > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setSkipDuplicates(false)}
+                  className="btn btn-sm btn-secondary"
+                >
+                  Incluir ya extraídas
+                </button>
+              ) : undefined
+            }
+          />
+        </div>
+      )}
+
+      {!loading && prospects.length > 0 && (
+        <section className="animate-fade-up space-y-3">
+          {searchMeta && (
+            <p className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+              <Sparkles className="h-3.5 w-3.5 text-violet-300" />
+              {prospects.length} prospectos
+              {searchMeta.cityName ? ` en ${searchMeta.cityName}` : ""}
+              {searchMeta.countryName ? `, ${searchMeta.countryName}` : ""}
+              {searchMeta.source && <span className="chip">Fuente: {searchMeta.source}</span>}
+            </p>
+          )}
+          <ResultsTable />
+        </section>
+      )}
+
+      {!loading && !error && !emptyInfo && prospects.length === 0 && (
+        <div className="card animate-fade-up">
+          <EmptyState
+            icon={Search}
+            title="Lanza tu primera búsqueda"
+            description="Escribe un nicho y una ciudad. En modo gratis no necesitas ninguna API Key; los resultados se guardan en este navegador."
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EngineCard({
+  active,
+  icon: Icon,
+  title,
+  subtitle,
+  badge,
+  warn,
+  onClick,
+}: {
+  active: boolean;
+  icon: typeof Cpu;
+  title: string;
+  subtitle: string;
+  badge: string;
+  warn?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`group flex items-start gap-3 rounded-2xl border p-4 text-left transition ${
+        active
+          ? "border-violet-400/50 bg-gradient-to-br from-violet-500/15 to-indigo-500/5 ring-1 ring-violet-400/20"
+          : "border-white/[0.07] bg-white/[0.015] hover:border-white/15 hover:bg-white/[0.03]"
+      }`}
+    >
+      <span
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
+          active ? "bg-violet-500/25 text-violet-200" : "bg-white/[0.05] text-slate-400"
+        }`}
+      >
+        <Icon className="h-4 w-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center justify-between gap-2">
+          <span className={`text-sm font-semibold ${active ? "text-white" : "text-slate-300"}`}>{title}</span>
+          <span
+            className={`badge ${
+              warn ? "border-amber-500/30 text-amber-300" : "border-emerald-500/30 text-emerald-300"
+            }`}
+          >
+            {badge}
+          </span>
+        </span>
+        <span className="mt-0.5 block text-[11px] text-slate-500">{subtitle}</span>
+      </span>
+    </button>
+  );
+}
+
+function SearchProgress({ stage, elapsed, expected }: { stage: string; elapsed: number; expected: number }) {
+  const progress = Math.min(95, Math.round((elapsed / Math.max(expected, 1)) * 100));
+  return (
+    <div className="card card-pad animate-fade-up" aria-live="polite">
+      <div className="flex items-center gap-4">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-300">
+          <Spinner className="h-5 w-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-white">Buscando prospectos…</p>
+          <p className="mt-0.5 truncate text-xs text-slate-400">{stage}</p>
+        </div>
+        <span className="text-xs font-medium text-slate-500 tabular-nums">
+          {elapsed}s <span className="text-slate-700">/ ~{expected}s</span>
+        </span>
+      </div>
+      <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/[0.05]">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-violet-500 via-indigo-400 to-cyan-400 transition-[width] duration-500"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+      <div className="mt-5 space-y-2.5">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-3">
+            <div className="skeleton h-8 w-8 rounded-lg" />
+            <div className="skeleton h-3 rounded" style={{ width: `${70 - (i % 3) * 14}%` }} />
+          </div>
         ))}
       </div>
     </div>
+  );
+}
+
+function NicheCatalog({
+  open,
+  onClose,
+  onPick,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onPick: (niche: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const groups = NICHE_CATALOG.map((g) => ({
+    ...g,
+    niches: q ? g.niches.filter((n) => n.toLowerCase().includes(q) || g.sector.toLowerCase().includes(q)) : g.niches,
+  })).filter((g) => g.niches.length > 0);
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Explorar nichos"
+      description="Elige un rubro o escribe cualquier otro en el buscador: el motor acepta cualquier nicho."
+      className="max-w-3xl"
+    >
+      <input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Buscar nicho o sector…"
+        aria-label="Buscar nicho"
+        className="input"
+        autoFocus
+      />
+      <div className="mt-4 space-y-5">
+        {groups.map((g) => (
+          <div key={g.sector}>
+            <p className="eyebrow">{g.sector}</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {g.niches.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => onPick(n)}
+                  className="chip transition hover:border-violet-400/50 hover:bg-violet-500/15 hover:text-white"
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+        {groups.length === 0 && (
+          <div className="text-center text-xs text-slate-500">
+            <p>No está en el catálogo, pero puedes buscarlo igual.</p>
+            <button type="button" onClick={() => onPick(query.trim())} className="btn btn-sm btn-primary mt-3">
+              Usar «{query.trim()}»
+            </button>
+          </div>
+        )}
+      </div>
+    </Modal>
   );
 }

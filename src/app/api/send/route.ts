@@ -1,28 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isValidEmail, sanitizeHtml } from "@/lib/sanitize";
-import { rateLimit } from "@/lib/rate-limit";
+import { limitRequest } from "@/lib/rate-limit";
 import { deterministicHash, parseProviderConfig } from "@/lib/email-providers";
 import { sendEmail } from "@/lib/server-mailer";
+import { htmlToPlainText, isHtmlTemplate } from "@/lib/template";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
-  const forwarded = request.headers.get("x-forwarded-for") ?? "";
-  const ip = forwarded.split(",")[0]?.trim() || "local";
-
-  const rl = rateLimit(ip, { capacity: 8, refillAmount: 1, refillPerMs: 2500 });
-  if (!rl.ok) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "rate_limited",
-        message: "Demasiadas solicitudes. Espera antes de continuar.",
-        retryAfter: rl.retryAfter,
-      },
-      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
-    );
-  }
+  const limited = limitRequest(request, "send", "Demasiadas solicitudes. Espera antes de continuar.", { capacity: 8, refillAmount: 1, refillPerMs: 2500 });
+  if (limited) return limited;
 
   let payload: unknown;
   try {
@@ -36,13 +24,19 @@ export async function POST(request: NextRequest) {
 
   const to = typeof body.to === "string" ? body.to.trim() : "";
   const subject = typeof body.subject === "string" ? body.subject.slice(0, 200) : "";
-  const rawBody = typeof body.body === "string" ? body.body.slice(0, 50000) : "";
+  const rawBody = typeof body.body === "string" ? body.body.slice(0, 600000) : "";
 
   if (!isValidEmail(to)) {
-    return NextResponse.json({ success: false, error: "invalid_email" }, { status: 400 });
+    return NextResponse.json(
+      { success: false, error: "invalid_email", message: "Dirección de destino no válida." },
+      { status: 400 }
+    );
   }
   if (!subject.trim()) {
-    return NextResponse.json({ success: false, error: "missing_subject" }, { status: 400 });
+    return NextResponse.json(
+      { success: false, error: "missing_subject", message: "El asunto está vacío." },
+      { status: 400 }
+    );
   }
   if (config.mode !== "simulated" && !isValidEmail(config.senderEmail)) {
     return NextResponse.json(
@@ -55,7 +49,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const safeBody = sanitizeHtml(rawBody);
+  const isHtml = isHtmlTemplate(rawBody);
+  const safeBody = isHtml
+    ? sanitizeHtml(rawBody)
+    : `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.7;white-space:pre-wrap;">${rawBody
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")}</div>`;
+  const text = isHtml ? htmlToPlainText(safeBody) : rawBody;
 
   if (config.mode === "simulated") {
     // En modo demostración se reserva un porcentaje determinista de "rebotes"
@@ -79,6 +80,7 @@ export async function POST(request: NextRequest) {
     to,
     subject,
     html: safeBody,
+    text,
   });
 
   return NextResponse.json(result, { status: result.success ? 200 : 502 });

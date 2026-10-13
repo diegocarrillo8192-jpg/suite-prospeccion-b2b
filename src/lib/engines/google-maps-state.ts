@@ -193,10 +193,10 @@ export function parseMapsState(raw: string): MapsEntry[] {
   return parseMapsSearchResults(raw);
 }
 
-export function buildMapsPb(lon: number, lat: number, zoom: number): string {
+export function buildMapsPb(lon: number, lat: number, zoom: number, offset = 0): string {
   return (
     `!4m12!1m3!1d3826.902183192154!2d${lon.toFixed(4)}!3d${lat.toFixed(4)}!2m3` +
-    `!1f0!2f0!3f0!3m2!1i600!2i800!4f${zoom.toFixed(1)}!7i20!8i0!10b1` +
+    `!1f0!2f0!3f0!3m2!1i600!2i800!4f${zoom.toFixed(1)}!7i20!8i${Math.max(0, Math.floor(offset))}!10b1` +
     `!12m22!1m3!18b1!30b1!34e1!2m3!5m1!6e2!20e3!4b0!10b1!12b1!13b1!16b1` +
     `!17m1!3e1!20m3!5e2!6b1!14b1!46m1!1b0!96b1!19m4!2m3!1i360!2i120!4i8`
   );
@@ -204,11 +204,12 @@ export function buildMapsPb(lon: number, lat: number, zoom: number): string {
 
 export function buildMapsSearchUrl(
   query: string,
-  location?: { latitude: number; longitude: number; zoom?: number }
+  location?: { latitude: number; longitude: number; zoom?: number },
+  offset = 0
 ): string {
   const q = encodeURIComponent(query.trim());
   if (!location) return `https://maps.google.com/search?tbm=map&authuser=0&hl=es&q=${q}`;
-  const pb = buildMapsPb(location.longitude, location.latitude, location.zoom ?? 14);
+  const pb = buildMapsPb(location.longitude, location.latitude, location.zoom ?? 14, offset);
   return `https://maps.google.com/search?tbm=map&authuser=0&hl=es&q=${q}&pb=${encodeURIComponent(pb)}`;
 }
 
@@ -228,9 +229,10 @@ export function buildMapsBrowseUrl(
 export async function fetchMapsSearch(
   query: string,
   location: { latitude: number; longitude: number; zoom?: number },
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  offset = 0
 ): Promise<string> {
-  const url = buildMapsSearchUrl(query, location);
+  const url = buildMapsSearchUrl(query, location, offset);
   try {
     const response = await fetch(url, {
       headers: {

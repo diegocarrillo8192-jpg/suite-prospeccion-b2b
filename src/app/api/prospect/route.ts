@@ -6,11 +6,11 @@ import {
   type EngineId,
 } from "@/lib/prospect-service";
 import { sanitizeText } from "@/lib/sanitize";
-import { rateLimit } from "@/lib/rate-limit";
+import { limitRequest } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 const ALLOWED_LIMITS = [10, 25, 50, 100];
 
@@ -38,21 +38,8 @@ function messageForError(error: ExtractionError): string {
 }
 
 export async function POST(request: NextRequest) {
-  const forwarded = request.headers.get("x-forwarded-for") ?? "";
-  const ip = forwarded.split(",")[0]?.trim() || "local";
-
-  const rl = rateLimit(ip, { capacity: 5, refillAmount: 1, refillPerMs: 6000 });
-  if (!rl.ok) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "rate_limited",
-        message: "Demasiadas búsquedas. Espera antes de continuar.",
-        retryAfter: rl.retryAfter,
-      },
-      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
-    );
-  }
+  const limited = limitRequest(request, "prospect", "Demasiadas búsquedas. Espera antes de continuar.", { capacity: 5, refillAmount: 1, refillPerMs: 6000 });
+  if (limited) return limited;
 
   let payload: unknown;
   try {
@@ -120,13 +107,17 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    const known = err instanceof ExtractionError;
+    console.error("[prospect] extracción fallida:", err);
     return NextResponse.json(
       {
-        success: true,
-        prospects: [],
-        meta: { source: "", countryCode: "", countryName: "", cityName: city },
+        success: false,
+        error: known ? err.code : "extraction_failed",
+        message: known
+          ? messageForError(err)
+          : "No se pudieron obtener resultados en este momento. Intenta de nuevo en unos segundos.",
       },
-      { status: 200 }
+      { status: 502 }
     );
   }
 }

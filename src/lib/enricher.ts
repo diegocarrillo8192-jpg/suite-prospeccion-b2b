@@ -348,6 +348,25 @@ export function rankEmails(emails: string[], websiteHost: string): string[] {
   return [...sameDomain, ...others];
 }
 
+const SHARED_HOSTS =
+  /(wixsite|wix\.com|hostingersite|business\.site|blogspot|wordpress\.com|weebly|squarespace|godaddysites|webnode|jimdo|site123|negocio\.site|github\.io|netlify|vercel\.app|carrd\.co|linktr\.ee|google\.com)/i;
+
+/**
+ * Propone `info@dominio` cuando el sitio no publica un correo, solo si el
+ * dominio es propio y tiene registros MX (puede recibir correo).
+ */
+export async function guessEmail(website: string): Promise<string> {
+  const host = hostOf(normalizeWebsite(website)).replace(/^www\./, "");
+  if (!host || !host.includes(".") || SHARED_HOSTS.test(host)) return "";
+  const candidate = `info@${host}`;
+  try {
+    const result = await validateEmail(candidate);
+    return result.hasMx && result.status !== "invalid" ? candidate : "";
+  } catch {
+    return "";
+  }
+}
+
 export async function enrichProspect(
   input: {
     website?: string;

@@ -3,9 +3,9 @@ import type { Prospect, SocialLinks } from "./types";
 import type { ExtractionMeta, GeoLocation } from "./extract";
 import { extractProspects, geocodeCity } from "./extract";
 import { countryNameFor } from "./country-codes";
-import { enrichProspect, type EnrichmentResult } from "./enricher";
+import { enrichProspect, guessEmail, type EnrichmentResult } from "./enricher";
 import { mapLimit } from "./concurrency";
-import { filterProspectsByDomain } from "./engines/domains";
+import { sanitizeProspectWebsites } from "./engines/domains";
 import { planQueries } from "./engines/query";
 import { formatPhone, makeId, normalizeWebsite } from "./engines/shared";
 import { extractGoogleMapsPublic } from "./engines/google-maps";
@@ -304,17 +304,55 @@ export async function scrapeGoogleMapsLocal(
   }
 }
 
-async function httpSearchLocal(geo: GeoLocation, topic: string, limit: number): Promise<ScrapedPlace[]> {
+function placeKey(place: ScrapedPlace): string {
+  return place.name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * Endpoint interno de Google Maps (sin navegador) con paginación de 20 en 20.
+ * Permite pasar de los ~20 resultados de la primera página a 100 o más, y
+ * probar sinónimos del nicho para ampliar la cobertura.
+ */
+async function httpSearchLocal(
+  geo: GeoLocation,
+  topic: string,
+  limit: number,
+  exclude: Set<string> = new Set(),
+  deadline = Date.now() + 30000
+): Promise<ScrapedPlace[]> {
   const plan = planQueries(topic, geo.cityName, geo.countryName);
-  const body = await fetchMapsSearch(plan.phrase, {
-    latitude: geo.latitude,
-    longitude: geo.longitude,
-    zoom: DEFAULT_ZOOM,
-  });
-  if (!body) return [];
-  const entries = parseMapsSearchResults(body);
-  if (entries.length === 0) return [];
-  return dedupePlaces(entries.map(entryToScraped)).slice(0, Math.max(limit, 20));
+  const phrases = [plan.phrase, ...plan.synonyms];
+  const location = { latitude: geo.latitude, longitude: geo.longitude, zoom: DEFAULT_ZOOM };
+  const found: ScrapedPlace[] = [];
+  const seen = new Set(exclude);
+
+  for (const phrase of phrases) {
+    for (let offset = 0; offset < 200 && found.length < limit; offset += 20) {
+      if (Date.now() > deadline) return found;
+      const body = await fetchMapsSearch(phrase, location, AbortSignal.timeout(12000), offset);
+      if (!body) break;
+      const entries = parseMapsSearchResults(body);
+      let fresh = 0;
+      for (const entry of entries) {
+        const place = entryToScraped(entry);
+        const key = placeKey(place);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        found.push(place);
+        fresh++;
+        if (found.length >= limit) break;
+      }
+      // Página vacía o repetida: no hay más resultados para esta frase.
+      if (entries.length < 5 || fresh === 0) break;
+    }
+    if (found.length >= limit) break;
+  }
+  return found;
 }
 
 function scrapedPlaceToProspect(
@@ -348,12 +386,22 @@ async function extractLocal(request: HybridRequest): Promise<EngineResult> {
   const topic = request.niche.trim() || "negocios";
 
   if (geo) {
+    const deadline = Date.now() + 55000;
     let places = await scrapeGoogleMapsLocal(geo, topic, request.limit);
     let source = "Google Maps (Scraping Local · Playwright)";
 
-    if (places.length === 0) {
-      places = await httpSearchLocal(geo, topic, request.limit);
-      source = "Google Maps (Scraping Local · Endpoint interno)";
+    if (places.length < request.limit) {
+      // Completa con más páginas y sinónimos del nicho.
+      const extra = await httpSearchLocal(
+        geo,
+        topic,
+        request.limit - places.length,
+        new Set(places.map(placeKey)),
+        deadline
+      );
+      if (places.length === 0) source = "Google Maps (Scraping Local · Endpoint interno)";
+      else if (extra.length > 0) source = "Google Maps (Scraping Local · Playwright + paginación)";
+      places = [...places, ...extra];
     }
 
     if (places.length > 0) {
@@ -398,6 +446,13 @@ function mergeContacts(prospect: Prospect, detail: EnrichmentResult): Prospect {
     patch.whatsapp = detail.phoneDigits;
   }
 
+  if (detail.tech?.analyzed) {
+    patch.techStack = detail.tech.detected;
+    patch.techSsl = detail.tech.ssl;
+    patch.techServer = detail.tech.server;
+    if (detail.tech.opportunity) patch.webOpportunity = detail.tech.opportunity;
+  }
+
   if (detail.validation) {
     patch.emailStatus = detail.validation.status;
     patch.emailStatusLabel = detail.validation.label;
@@ -427,7 +482,7 @@ export async function crawlDeepContacts(
   const selected = targets.slice(0, limit);
   const updates = new Map<string, Prospect>();
 
-  await mapLimit(selected, options.concurrency ?? 6, async (prospect) => {
+  await mapLimit(selected, options.concurrency ?? 10, async (prospect) => {
     try {
       const detail = await enrichProspect(
         {
@@ -442,7 +497,12 @@ export async function crawlDeepContacts(
           concurrency: 3,
         }
       );
-      updates.set(prospect.id, mergeContacts(prospect, detail));
+      const merged = mergeContacts(prospect, detail);
+      if (!detail.bestEmail && (!merged.correo || merged.correo === "No disponible")) {
+        const guess = await guessEmail(prospect.website);
+        if (guess) merged.emailGuess = guess;
+      }
+      updates.set(prospect.id, merged);
     } catch {
       updates.set(prospect.id, prospect);
     }
@@ -471,15 +531,34 @@ export async function extractWithHybrid(request: HybridRequest): Promise<EngineR
       apifyActor: request.apifyActor,
       googleKey: keys.googleKey,
     };
-    result =
-      apiEngine === "google"
-        ? await extractWithGooglePlaces(engineRequest)
-        : await extractWithApify(engineRequest);
+    try {
+      result =
+        apiEngine === "google"
+          ? await extractWithGooglePlaces(engineRequest)
+          : await extractWithApify(engineRequest);
+      if (result.prospects.length === 0) {
+        const local = await extractLocal(request);
+        if (local.prospects.length > 0) {
+          result = {
+            ...local,
+            meta: { ...local.meta, warning: "La API no devolvió resultados; se usó el scraping local." },
+          };
+        }
+      }
+    } catch (error) {
+      // La API falló (clave, cuota, red…): se continúa con el motor local gratuito.
+      const reason = error instanceof Error ? error.message : "Error del proveedor";
+      const local = await extractLocal(request);
+      result = {
+        ...local,
+        meta: { ...local.meta, warning: `${reason} Se usó el scraping local como respaldo.` },
+      };
+    }
   } else {
     result = await extractLocal(request);
   }
 
-  let prospects = filterProspectsByDomain(result.prospects);
+  let prospects = sanitizeProspectWebsites(result.prospects);
 
   if (request.deepCrawl !== false && prospects.length > 0) {
     prospects = await crawlDeepContacts(prospects, {

@@ -22,6 +22,9 @@ describe("galería de plantillas prediseñadas", () => {
       "propuesta",
       "auditoria",
       "contacto",
+      "seguimiento",
+      "oferta",
+      "alianza",
     ]);
   });
 

@@ -6,11 +6,41 @@ import {
   type ProviderConfig,
 } from "./email-providers";
 
+export interface InlineImage {
+  cid: string;
+  filename: string;
+  contentType: string;
+  /** Contenido en base64. */
+  content: string;
+}
+
 export interface OutgoingEmail {
   to: string;
   subject: string;
   html: string;
   text?: string;
+}
+
+const DATA_IMG_RE = /src="data:(image\/(?:png|jpe?g|gif|webp));base64,([A-Za-z0-9+/=]+)"/gi;
+
+/**
+ * Los clientes de correo (Gmail, Outlook) bloquean imágenes `data:`. Se
+ * convierten en adjuntos en línea referenciados con `cid:`.
+ */
+export function extractInlineImages(html: string): { html: string; images: InlineImage[] } {
+  const images: InlineImage[] = [];
+  const byContent = new Map<string, string>();
+  const out = html.replace(DATA_IMG_RE, (_, contentType: string, content: string) => {
+    let cid = byContent.get(content);
+    if (!cid) {
+      cid = `img${images.length + 1}@suite-b2b`;
+      byContent.set(content, cid);
+      const ext = contentType.split("/")[1].replace("jpeg", "jpg");
+      images.push({ cid, filename: `imagen-${images.length + 1}.${ext}`, contentType, content });
+    }
+    return `src="cid:${cid}"`;
+  });
+  return { html: out, images };
 }
 
 export interface DeliveryResult {
@@ -37,6 +67,11 @@ function replyToAddress(config: ProviderConfig): string {
   return config.replyTo.trim() || config.senderEmail.trim();
 }
 
+/** Cabecera estándar para darse de baja (Gmail/Yahoo la muestran como botón). */
+function unsubscribeHeader(config: ProviderConfig): string {
+  return `<mailto:${replyToAddress(config)}?subject=BAJA>`;
+}
+
 function resolveSmtp(config: ProviderConfig): SmtpSettings {
   if (config.mode === "gmail") {
     return {
@@ -44,7 +79,8 @@ function resolveSmtp(config: ProviderConfig): SmtpSettings {
       port: Number(GMAIL_SMTP_PORT),
       secure: false,
       user: config.senderEmail,
-      pass: config.appPassword,
+      // Google muestra la App Password en grupos de 4 separados por espacios.
+      pass: config.appPassword.replace(/\s+/g, ""),
     };
   }
   const port = Number(config.smtpPort) || 587;
@@ -159,6 +195,7 @@ async function sendViaResend(
   if (!config.resendKey) {
     return { success: false, provider, message: "Falta la API Key de Resend." };
   }
+  const { html, images } = extractInlineImages(email.html);
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -170,9 +207,20 @@ async function sendViaResend(
         from: fromAddress(config),
         to: [email.to],
         subject: email.subject,
-        html: email.html,
+        html,
         text: email.text,
         reply_to: replyToAddress(config),
+        headers: { "List-Unsubscribe": unsubscribeHeader(config) },
+        ...(images.length
+          ? {
+              attachments: images.map((img) => ({
+                filename: img.filename,
+                content: img.content,
+                content_type: img.contentType,
+                content_id: img.cid,
+              })),
+            }
+          : {}),
       }),
     });
     if (!res.ok) return { success: false, provider, message: await readApiError(res) };
@@ -191,6 +239,7 @@ async function sendViaSendGrid(
   if (!config.sendgridKey) {
     return { success: false, provider, message: "Falta la API Key de SendGrid." };
   }
+  const { html, images } = extractInlineImages(email.html);
   try {
     const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
       method: "POST",
@@ -205,8 +254,23 @@ async function sendViaSendGrid(
           name: config.senderName.trim() || undefined,
         },
         reply_to: { email: replyToAddress(config) },
+        headers: { "List-Unsubscribe": unsubscribeHeader(config) },
         subject: email.subject,
-        content: [{ type: "text/html", value: email.html }],
+        content: [
+          ...(email.text ? [{ type: "text/plain", value: email.text }] : []),
+          { type: "text/html", value: html },
+        ],
+        ...(images.length
+          ? {
+              attachments: images.map((img) => ({
+                content: img.content,
+                type: img.contentType,
+                filename: img.filename,
+                disposition: "inline",
+                content_id: img.cid,
+              })),
+            }
+          : {}),
       }),
     });
     if (!res.ok) return { success: false, provider, message: await readApiError(res) };
@@ -233,13 +297,21 @@ export async function sendEmail(
     return { success: false, provider, message: "Configuración SMTP incompleta." };
   }
   try {
+    const { html, images } = extractInlineImages(email.html);
     const info = await transport.sendMail({
       from: fromAddress(config),
       to: email.to,
       replyTo: replyToAddress(config),
       subject: email.subject,
-      html: email.html,
+      html,
       text: email.text,
+      headers: { "List-Unsubscribe": unsubscribeHeader(config) },
+      attachments: images.map((img) => ({
+        filename: img.filename,
+        content: Buffer.from(img.content, "base64"),
+        contentType: img.contentType,
+        cid: img.cid,
+      })),
     });
     return { success: true, provider, id: info.messageId };
   } catch (error) {

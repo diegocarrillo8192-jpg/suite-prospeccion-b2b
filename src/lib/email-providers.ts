@@ -4,6 +4,9 @@ export interface MailerConfig {
   mode: MailerMode;
   senderName: string;
   senderEmail: string;
+  senderPhone: string;
+  senderWebsite: string;
+  logoUrl: string;
   replyTo: string;
   smtpHost: string;
   smtpPort: string;
@@ -74,6 +77,9 @@ export const DEFAULT_MAILER_CONFIG: MailerConfig = {
   mode: "gmail",
   senderName: "",
   senderEmail: "",
+  senderPhone: "",
+  senderWebsite: "",
+  logoUrl: "",
   replyTo: "",
   smtpHost: "",
   smtpPort: GMAIL_SMTP_PORT,
@@ -180,4 +186,22 @@ export function deterministicHash(value: string): number {
     hash = (Math.imul(hash, 31) + value.charCodeAt(i)) | 0;
   }
   return Math.abs(hash);
+}
+
+/** Envíos diarios recomendados por canal (cuentas nuevas / planes gratuitos). */
+export const DAILY_LIMITS: Record<MailerMode, number> = {
+  gmail: 500,
+  smtp: 300,
+  resend: 100,
+  sendgrid: 100,
+  simulated: 0,
+};
+
+/** Correos reales enviados hoy (hora local) según el historial de campañas. */
+export function sentToday(campaigns: { createdAt: number; mode: string; sent: number }[]): number {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  return campaigns
+    .filter((c) => c.mode !== "simulated" && c.createdAt >= start.getTime())
+    .reduce((acc, c) => acc + c.sent, 0);
 }

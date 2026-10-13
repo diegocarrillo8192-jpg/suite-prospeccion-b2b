@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateEmails } from "@/lib/validators/email-validator";
-import { rateLimit } from "@/lib/rate-limit";
+import { limitRequest } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,21 +29,8 @@ function domainOf(email: string): string {
 }
 
 export async function POST(request: NextRequest) {
-  const forwarded = request.headers.get("x-forwarded-for") ?? "";
-  const ip = forwarded.split(",")[0]?.trim() || "local";
-
-  const rl = rateLimit(ip, { capacity: 20, refillAmount: 1, refillPerMs: 800 });
-  if (!rl.ok) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "rate_limited",
-        message: "Demasiadas validaciones seguidas. Espera un momento.",
-        retryAfter: rl.retryAfter,
-      },
-      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
-    );
-  }
+  const limited = limitRequest(request, "validate-emails", "Demasiadas validaciones seguidas. Espera un momento.", { capacity: 20, refillAmount: 1, refillPerMs: 800 });
+  if (limited) return limited;
 
   let payload: unknown;
   try {

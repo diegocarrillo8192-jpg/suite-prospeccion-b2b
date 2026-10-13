@@ -39,6 +39,8 @@ export interface Prospect {
   rating?: number;
   reviews?: number;
   emails?: string[];
+  /** Correo probable (info@dominio con MX activo) cuando el sitio no publica uno. */
+  emailGuess?: string;
   social?: SocialLinks;
   emailStatus?: EmailValidationStatus;
   emailStatusLabel?: string;
@@ -50,7 +52,33 @@ export interface Prospect {
   webOpportunity?: WebOpportunity;
 }
 
-export type TabId = "search" | "sender";
+export type TabId = "dashboard" | "search" | "sender" | "connectors" | "guide";
+
+export interface CampaignResult {
+  email: string;
+  empresa: string;
+  ok: boolean;
+  message?: string;
+}
+
+export interface CampaignRecord {
+  id: string;
+  createdAt: number;
+  subject: string;
+  mode: string;
+  total: number;
+  sent: number;
+  failed: number;
+  cancelled: boolean;
+  results: CampaignResult[];
+}
+
+export interface SearchRecord {
+  niche: string;
+  city: string;
+  count: number;
+  at: number;
+}
 
 export interface SendStatus {
   total: number;

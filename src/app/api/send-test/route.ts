@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isValidEmail, sanitizeHtml } from "@/lib/sanitize";
-import { rateLimit } from "@/lib/rate-limit";
+import { limitRequest } from "@/lib/rate-limit";
 import { parseProviderConfig } from "@/lib/email-providers";
 import { sendEmail } from "@/lib/server-mailer";
+import { htmlToPlainText } from "@/lib/template";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,21 +30,8 @@ function testHtml(): string {
 }
 
 export async function POST(request: NextRequest) {
-  const forwarded = request.headers.get("x-forwarded-for") ?? "";
-  const ip = forwarded.split(",")[0]?.trim() || "local";
-
-  const rl = rateLimit(ip, { capacity: 6, refillAmount: 1, refillPerMs: 3000 });
-  if (!rl.ok) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "rate_limited",
-        message: "Demasiadas pruebas seguidas. Espera un momento.",
-        retryAfter: rl.retryAfter,
-      },
-      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
-    );
-  }
+  const limited = limitRequest(request, "send-test", "Demasiadas pruebas seguidas. Espera un momento.", { capacity: 6, refillAmount: 1, refillPerMs: 3000 });
+  if (limited) return limited;
 
   let payload: unknown;
   try {
@@ -67,14 +55,19 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const subject = typeof raw.subject === "string" && raw.subject.trim() ? raw.subject : TEST_SUBJECT;
-  const html = typeof raw.body === "string" && raw.body.trim() ? sanitizeHtml(raw.body) : testHtml();
+  const subject =
+    typeof raw.subject === "string" && raw.subject.trim() ? raw.subject.slice(0, 200) : TEST_SUBJECT;
+  const html =
+    typeof raw.body === "string" && raw.body.trim() ? sanitizeHtml(raw.body.slice(0, 600000)) : testHtml();
 
   const result = await sendEmail(config, {
     to,
     subject,
     html,
-    text: "Tu remitente está listo. Este es un correo de prueba de la Suite de Prospección B2B.",
+    text:
+      typeof raw.body === "string" && raw.body.trim()
+        ? htmlToPlainText(html)
+        : "Tu remitente está listo. Este es un correo de prueba de la Suite de Prospección B2B.",
   });
 
   return NextResponse.json(

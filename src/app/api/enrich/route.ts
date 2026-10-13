@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enrichProspect } from "@/lib/enricher";
-import { rateLimit } from "@/lib/rate-limit";
+import { limitRequest } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,21 +44,8 @@ function readItem(value: unknown): EnrichItem | null {
 }
 
 export async function POST(request: NextRequest) {
-  const forwarded = request.headers.get("x-forwarded-for") ?? "";
-  const ip = forwarded.split(",")[0]?.trim() || "local";
-
-  const rl = rateLimit(ip, { capacity: 12, refillAmount: 1, refillPerMs: 1200 });
-  if (!rl.ok) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "rate_limited",
-        message: "Demasiados enriquecimientos seguidos. Espera un momento.",
-        retryAfter: rl.retryAfter,
-      },
-      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
-    );
-  }
+  const limited = limitRequest(request, "enrich", "Demasiados enriquecimientos seguidos. Espera un momento.", { capacity: 12, refillAmount: 1, refillPerMs: 1200 });
+  if (limited) return limited;
 
   let payload: unknown;
   try {

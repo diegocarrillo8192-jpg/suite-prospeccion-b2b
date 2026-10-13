@@ -45,13 +45,15 @@ describe("Emisor de Correos — flujo completo de campaña", () => {
     uploadCsv(container);
 
     await waitFor(() => {
-      expect(screen.getByText(/Ana Pérez/)).toBeTruthy();
+      expect(screen.getAllByText(/Ana Pérez/).length).toBeGreaterThan(0);
     });
     expect(screen.getByText(/Luis Gómez/)).toBeTruthy();
     expect(
       screen.getByText(/2 contactos importados automáticamente desde prospectos.csv/i)
     ).toBeTruthy();
     expect(screen.getByText(/ana@acme.com · Madrid/)).toBeTruthy();
+    // La vista previa usa el primer destinatario real.
+    expect(screen.getByText(/Vista previa · Acme SA/)).toBeTruthy();
   });
 
   it("b) cambia entre las plantillas prediseñadas", () => {
@@ -170,7 +172,7 @@ describe("Emisor de Correos — flujo completo de campaña", () => {
 
     uploadCsv(container);
     await waitFor(() => {
-      expect(screen.getByText(/Ana Pérez/)).toBeTruthy();
+      expect(screen.getAllByText(/Ana Pérez/).length).toBeGreaterThan(0);
     });
 
     // 5. Lanzar la campaña

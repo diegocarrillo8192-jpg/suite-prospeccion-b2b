@@ -39,6 +39,8 @@ export interface ExtractionMeta {
   countryCode: string;
   countryName: string;
   cityName: string;
+  /** Aviso no bloqueante (p. ej. la API falló y se usó el respaldo local). */
+  warning?: string;
 }
 
 export interface GeoLocation {
@@ -214,6 +216,12 @@ async function fetchJson(
   }
 }
 
+function cleanCityName(value: string): string {
+  return value
+    .replace(/\s+(ciudad|city|municipio|distrito)$/i, "")
+    .trim();
+}
+
 export async function geocodeCity(city: string): Promise<GeoLocation | null> {
   try {
     const url = `${NOMINATIM_BASE}/search?format=jsonv2&limit=1&addressdetails=1&accept-language=es&q=${encodeURIComponent(city)}`;
@@ -226,7 +234,9 @@ export async function geocodeCity(city: string): Promise<GeoLocation | null> {
     return {
       countryCode: (addr.country_code ?? "").toUpperCase(),
       countryName: addr.country ?? "",
-      cityName: addr.city ?? addr.town ?? addr.village ?? addr.municipality ?? addr.state ?? city,
+      cityName: cleanCityName(
+        addr.city ?? addr.town ?? addr.village ?? addr.municipality ?? addr.state ?? city
+      ),
       latitude: Number.isFinite(latitude) ? latitude : 0,
       longitude: Number.isFinite(longitude) ? longitude : 0,
     };

@@ -1,7 +1,8 @@
 "use client";
 
 import { useId, useState, useSyncExternalStore } from "react";
-import { CHIPS, isHtmlTemplate, renderTemplate, senderExtras } from "@/lib/template";
+import { Code2, Monitor, PenLine, Smartphone } from "lucide-react";
+import { CHIPS, isHtmlTemplate, renderTemplate, resolvePlaceholderLinks, senderExtras } from "@/lib/template";
 import {
   getMailerSnapshot,
   getServerMailerSnapshot,
@@ -14,6 +15,7 @@ import {
   parseFields,
   type TemplateFields,
 } from "@/lib/email-templates";
+import { sanitizeHtml } from "@/lib/sanitize";
 import type { Prospect } from "@/lib/types";
 
 interface Props {
@@ -21,6 +23,16 @@ interface Props {
   onSubject: (s: string) => void;
   body: string;
   onBody: (s: string) => void;
+  templateId?: string;
+  onTemplateId?: (id: string) => void;
+  /** Destinatario real para la vista previa; si no hay, se usa un ejemplo. */
+  sample?: Prospect;
+  /** El asunto se edita fuera (constructor de campaña). */
+  hideSubject?: boolean;
+  /** Texto de vista previa (preheader) mostrado en la cabecera de la vista previa. */
+  preheader?: string;
+  /** Sin tarjeta ni título: se integra dentro de otra sección. */
+  bare?: boolean;
 }
 
 type Mode = "visual" | "code";
@@ -41,10 +53,30 @@ const SAMPLE: Prospect = {
   rubro: "Servicios",
 };
 
-export function TemplateEditor({ subject, onSubject, body, onBody }: Props) {
-  const [mode, setMode] = useState<Mode>("visual");
-  const [activeId, setActiveId] = useState<string>(EMAIL_TEMPLATES[0].id);
-  const [fields, setFields] = useState<TemplateFields>(EMAIL_TEMPLATES[0].defaults);
+export function TemplateEditor({
+  subject,
+  onSubject,
+  body,
+  onBody,
+  templateId,
+  onTemplateId,
+  sample,
+  hideSubject,
+  preheader,
+  bare,
+}: Props) {
+  const [mode, setMode] = useState<Mode>(() => (hasEditableFields(body) ? "visual" : "code"));
+  const [activeId, setActiveIdState] = useState<string>(templateId ?? EMAIL_TEMPLATES[0].id);
+  const [fields, setFields] = useState<TemplateFields>(() =>
+    hasEditableFields(body) ? parseFields(body) : EMAIL_TEMPLATES[0].defaults
+  );
+  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
+  const previewTarget = sample ?? SAMPLE;
+
+  function setActiveId(id: string) {
+    setActiveIdState(id);
+    onTemplateId?.(id);
+  }
   const mailer = useSyncExternalStore(
     subscribeMailer,
     getMailerSnapshot,
@@ -53,10 +85,15 @@ export function TemplateEditor({ subject, onSubject, body, onBody }: Props) {
 
   const fromName = mailer.senderName.trim() || DEFAULT_SENDER_NAME;
   const fromEmail = mailer.senderEmail.trim() || DEFAULT_SENDER_EMAIL;
-  const extras = senderExtras({
-    senderName: mailer.senderName,
-    senderEmail: mailer.senderEmail,
-  });
+  const extras = senderExtras(
+    {
+      senderName: mailer.senderName,
+      senderEmail: mailer.senderEmail,
+      senderPhone: mailer.senderPhone,
+      logoUrl: mailer.logoUrl,
+    },
+    { preview: true }
+  );
 
   const editable = hasEditableFields(body);
 
@@ -108,9 +145,18 @@ export function TemplateEditor({ subject, onSubject, body, onBody }: Props) {
   const previewHtml = isHtmlTemplate(body);
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 shadow-xl shadow-black/20 backdrop-blur-xl">
+    <div className={bare ? "" : "card card-pad"}>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold text-slate-100">Plantilla / Editor de Mensaje</h3>
+        <div className="flex items-center gap-2.5">
+          {!bare && (
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/15 text-violet-300">
+              <PenLine className="h-4 w-4" />
+            </span>
+          )}
+          <h3 className={bare ? "text-xs font-medium text-slate-400" : "text-sm font-semibold text-white"}>
+            {bare ? "Modo de edición" : "Plantilla / Editor de Mensaje"}
+          </h3>
+        </div>
         <div
           role="tablist"
           aria-label="Modo de edición"
@@ -120,6 +166,7 @@ export function TemplateEditor({ subject, onSubject, body, onBody }: Props) {
             Editor Visual
           </ModeTab>
           <ModeTab active={mode === "code"} onClick={() => switchMode("code")}>
+            <Code2 className="h-3.5 w-3.5" aria-hidden="true" />
             Código HTML
           </ModeTab>
         </div>
@@ -127,7 +174,7 @@ export function TemplateEditor({ subject, onSubject, body, onBody }: Props) {
 
       <div className="mt-4">
         <p className="mb-2 text-xs font-medium text-slate-400">Plantillas prediseñadas</p>
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-4">
           {EMAIL_TEMPLATES.map((tpl) => {
             const active = activeId === tpl.id;
             return (
@@ -138,8 +185,8 @@ export function TemplateEditor({ subject, onSubject, body, onBody }: Props) {
                 aria-pressed={active}
                 className={`rounded-xl border p-3 text-left transition ${
                   active
-                    ? "border-emerald-500/60 bg-emerald-500/10"
-                    : "border-white/10 bg-slate-900/40 hover:border-white/20 hover:bg-white/5"
+                    ? "border-violet-400/50 bg-violet-500/10 ring-1 ring-violet-400/20"
+                    : "border-white/[0.07] bg-white/[0.015] hover:border-white/20 hover:bg-white/[0.04]"
                 }`}
               >
                 <span className="mb-2 flex items-center gap-2">
@@ -158,17 +205,14 @@ export function TemplateEditor({ subject, onSubject, body, onBody }: Props) {
         </div>
       </div>
 
-      <div className="mt-5">
-        <label htmlFor="tpl-subject" className="mb-1.5 block text-xs font-medium text-slate-400">
-          Asunto
-        </label>
-        <input
-          id="tpl-subject"
-          value={subject}
-          onChange={(e) => onSubject(e.target.value)}
-          className="w-full rounded-xl border border-white/10 bg-slate-900/60 px-3.5 py-2.5 text-sm text-slate-100 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-        />
-      </div>
+      {!hideSubject && (
+        <div className="mt-5">
+          <label htmlFor="tpl-subject" className="mb-1.5 block text-xs font-medium text-slate-400">
+            Asunto
+          </label>
+          <input id="tpl-subject" value={subject} onChange={(e) => onSubject(e.target.value)} className="input" />
+        </div>
+      )}
 
       {mode === "visual" ? (
         <div className="mt-5 space-y-4">
@@ -186,7 +230,7 @@ export function TemplateEditor({ subject, onSubject, body, onBody }: Props) {
                 key={c.token}
                 type="button"
                 onClick={() => insertToken(c.token)}
-                className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] font-medium text-sky-300 transition hover:bg-white/10"
+                className="rounded-md border border-violet-400/20 bg-violet-500/10 px-2 py-1 text-[11px] font-medium text-violet-200 transition hover:bg-violet-500/20"
               >
                 + {c.label}
               </button>
@@ -248,29 +292,58 @@ export function TemplateEditor({ subject, onSubject, body, onBody }: Props) {
             onChange={(e) => onBody(e.target.value)}
             rows={14}
             spellCheck={false}
-            className="w-full resize-y rounded-xl border border-white/10 bg-slate-900/60 px-3.5 py-2.5 font-mono text-xs text-slate-100 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+            className="input resize-y font-mono text-xs leading-relaxed"
           />
         </div>
       )}
 
-      <div className="mt-4">
-        <p className="mb-1.5 text-xs font-medium text-slate-400">Vista previa</p>
-        <div className="overflow-hidden rounded-xl border border-white/10 bg-slate-900/50 shadow-xl shadow-black/20 backdrop-blur-xl">
+      <div className="mt-6">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="text-xs font-medium text-slate-400">
+            Vista previa{sample ? ` · ${sample.empresa}` : " · datos de ejemplo"}
+          </p>
+          <div className="flex gap-1 rounded-lg border border-white/10 bg-slate-950/40 p-0.5" role="group" aria-label="Dispositivo de vista previa">
+            <button
+              type="button"
+              onClick={() => setDevice("desktop")}
+              aria-pressed={device === "desktop"}
+              aria-label="Vista escritorio"
+              className={`rounded-md p-1.5 transition ${device === "desktop" ? "bg-white/10 text-white" : "text-slate-500 hover:text-slate-300"}`}
+            >
+              <Monitor className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setDevice("mobile")}
+              aria-pressed={device === "mobile"}
+              aria-label="Vista móvil"
+              className={`rounded-md p-1.5 transition ${device === "mobile" ? "bg-white/10 text-white" : "text-slate-500 hover:text-slate-300"}`}
+            >
+              <Smartphone className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+        <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/40">
           <div className="space-y-1.5 border-b border-white/10 bg-white/[0.03] px-4 py-3 text-xs">
             <PreviewRow label="De" value={`${fromName} <${fromEmail}>`} />
-            <PreviewRow label="Para" value={SAMPLE.correo} />
-            <PreviewRow label="Asunto" value={renderTemplate(subject, SAMPLE, extras)} strong />
+            <PreviewRow label="Para" value={previewTarget.correo} />
+            <PreviewRow label="Asunto" value={renderTemplate(subject, previewTarget, extras)} strong />
+            {preheader?.trim() && <PreviewRow label="Preview" value={renderTemplate(preheader, previewTarget, extras)} />}
           </div>
-          {previewHtml ? (
-            <div
-              className="bg-white"
-              dangerouslySetInnerHTML={{ __html: renderTemplate(body, SAMPLE, extras) }}
-            />
-          ) : (
-            <div className="whitespace-pre-wrap px-4 py-4 text-sm text-slate-300">
-              {renderTemplate(body, SAMPLE, extras)}
-            </div>
-          )}
+          <div className={`mx-auto transition-[max-width] duration-300 ${device === "mobile" ? "max-w-[380px]" : "max-w-full"}`}>
+            {previewHtml ? (
+              <div
+                className="bg-white"
+                dangerouslySetInnerHTML={{
+                  __html: sanitizeHtml(resolvePlaceholderLinks(renderTemplate(body, previewTarget, extras), mailer)),
+                }}
+              />
+            ) : (
+              <div className="whitespace-pre-wrap px-4 py-4 text-sm text-slate-300">
+                {renderTemplate(body, previewTarget, extras)}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -292,7 +365,7 @@ function ModeTab({
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
         active
           ? "bg-slate-700/70 text-white shadow-sm"
           : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
@@ -321,8 +394,7 @@ function Field({
   type?: string;
 }) {
   const id = useId();
-  const classes =
-    "w-full rounded-xl border border-white/10 bg-slate-900/60 px-3.5 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20";
+  const classes = "input";
   return (
     <div>
       <label htmlFor={id} className="mb-1.5 block text-xs font-medium text-slate-400">

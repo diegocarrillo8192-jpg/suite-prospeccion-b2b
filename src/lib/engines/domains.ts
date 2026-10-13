@@ -196,3 +196,114 @@ export function domainPriority(value: string, countryCode: string): number {
   if (target && countryOfHost(host) === target) return 0;
   return 1;
 }
+
+/**
+ * Directorios y plataformas de reservas/reseñas que suelen aparecer como "sitio
+ * web" en Google Maps. Rastrearlos devuelve los correos y redes del directorio,
+ * no los del negocio, así que se descartan como sitio propio.
+ */
+const DIRECTORY_HINTS: readonly string[] = [
+  "doctoralia",
+  "topdoctors",
+  "paginasamarillas",
+  "publicar.com",
+  "yellowpages",
+  "yell.com",
+  "interyellow",
+  "guiaempresa",
+  "empresite",
+  "einforma",
+  "infobel",
+  "tuugo",
+  "cybo.com",
+  "nicelocal",
+  "top-rated.online",
+  "findglocal",
+  "bizapedia",
+  "opendi",
+  "tupalo",
+  "zaubee",
+  "mapquest",
+  "groupon",
+  "booking.com",
+  "airbnb",
+  "expedia",
+  "trivago",
+  "agoda",
+  "hotels.com",
+  "kayak",
+  "despegar",
+  "mercadolibre",
+  "amazon.",
+  "yelp.",
+  "tripadvisor",
+  "foursquare",
+  "opentable",
+  "booksy",
+  "fresha",
+  "treatwell",
+  "rappi",
+  "pedidosya",
+  "ubereats",
+  "glovoapp",
+  "didi-food",
+  "cylex",
+  "infoisinfo",
+  "hotfrog",
+  "guiamais",
+  "waze.com",
+  "maps.app.goo.gl",
+  "goo.gl",
+  "google.com",
+  "linktr.ee",
+];
+
+const SOCIAL_HOSTS: ReadonlyArray<[RegExp, "instagram" | "facebook" | "linkedin" | "twitter" | "youtube" | "tiktok" | "whatsapp"]> = [
+  [/(^|\.)instagram\.com$/, "instagram"],
+  [/(^|\.)(facebook\.com|fb\.com|fb\.me)$/, "facebook"],
+  [/(^|\.)linkedin\.com$/, "linkedin"],
+  [/(^|\.)(twitter\.com|x\.com)$/, "twitter"],
+  [/(^|\.)(youtube\.com|youtu\.be)$/, "youtube"],
+  [/(^|\.)tiktok\.com$/, "tiktok"],
+  [/(^|\.)(wa\.me|api\.whatsapp\.com|whatsapp\.com)$/, "whatsapp"],
+];
+
+export type WebsiteKind =
+  | { kind: "own" }
+  | { kind: "none" }
+  | { kind: "directory" }
+  | { kind: "social"; platform: "instagram" | "facebook" | "linkedin" | "twitter" | "youtube" | "tiktok" | "whatsapp" };
+
+export function classifyWebsite(value: string): WebsiteKind {
+  const host = hostnameOf(value);
+  if (!host) return { kind: "none" };
+  for (const [re, platform] of SOCIAL_HOSTS) {
+    if (re.test(host)) return { kind: "social", platform };
+  }
+  if (DIRECTORY_HINTS.some((hint) => host.includes(hint))) return { kind: "directory" };
+  if (isExcludedDomain(host)) return { kind: "directory" };
+  return { kind: "own" };
+}
+
+/**
+ * Normaliza el sitio web de cada prospecto sin descartar el negocio: si el
+ * enlace es una red social se mueve a `social`; si es un directorio se borra
+ * para no rastrear contactos ajenos.
+ */
+export function sanitizeProspectWebsites<
+  T extends { website: string; social?: Partial<Record<string, string>> },
+>(prospects: T[]): T[] {
+  return prospects.map((prospect) => {
+    if (!prospect.website) return prospect;
+    const info = classifyWebsite(prospect.website);
+    if (info.kind === "own") return prospect;
+    if (info.kind === "social") {
+      return {
+        ...prospect,
+        website: "",
+        social: { [info.platform]: prospect.website, ...(prospect.social ?? {}) },
+      };
+    }
+    return { ...prospect, website: "" };
+  });
+}

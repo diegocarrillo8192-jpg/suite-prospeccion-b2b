@@ -36,5 +36,6 @@ export async function extractProspectsWithEngine(input: {
     apifyActor: input.keys.apifyActor,
     googleKey: input.keys.googleKey,
     deepCrawl: input.deepCrawl,
+    deepCrawlLimit: Math.min(input.limit, 60),
   });
 }
