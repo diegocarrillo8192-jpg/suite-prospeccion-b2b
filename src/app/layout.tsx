@@ -47,12 +47,24 @@ export const metadata: Metadata = {
   },
 };
 
+/**
+ * Decide antes del primer pintado si el splash se reproduce (primera visita de
+ * la sesión) o se omite. Corre durante el parseo del HTML, así la interfaz
+ * nunca se ve antes que el splash. `window.__b2bSplash` conserva la decisión
+ * porque React reinicia los atributos de <html> al remontar en desarrollo.
+ */
+const SPLASH_SCRIPT = `(function(){var m="play";try{if(sessionStorage.getItem("b2b.splash.seen")==="1")m="skip";else sessionStorage.setItem("b2b.splash.seen","1")}catch(e){}window.__b2bSplash=m;if(m==="skip")document.documentElement.setAttribute("data-splash","skip")})()`;
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="es"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: SPLASH_SCRIPT }} />
+      </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );

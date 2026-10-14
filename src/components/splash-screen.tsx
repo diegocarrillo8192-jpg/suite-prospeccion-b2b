@@ -2,9 +2,16 @@
 
 import { Logo } from "./logo";
 
-export function SplashScreen() {
+export function SplashScreen({ onFinish }: { onFinish?: () => void }) {
   return (
-    <div className="animate-splash-overlay fixed inset-0 z-[70] flex flex-col items-center justify-center bg-[#05070d]">
+    <div
+      role="status"
+      aria-label="Cargando Suite de Prospección B2B"
+      onAnimationEnd={(e) => {
+        if (e.animationName === "splash-fade-out") onFinish?.();
+      }}
+      className="splash-overlay animate-splash-overlay fixed inset-0 z-[70] flex flex-col items-center justify-center bg-[#05070d]"
+    >
       <div className="animate-splash-zoom flex flex-col items-center gap-6">
         <div className="relative">
           <span className="absolute -inset-6 -z-10 rounded-full bg-violet-500/30 blur-3xl" />

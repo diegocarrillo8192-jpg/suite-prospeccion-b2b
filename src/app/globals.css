@@ -159,6 +159,15 @@ dialog::backdrop {
   }
 }
 
+@keyframes shell-reveal {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @keyframes fade-up {
   from {
     opacity: 0;
@@ -224,6 +233,17 @@ dialog::backdrop {
 }
 .animate-splash-overlay {
   animation: splash-fade-out 0.4s ease-out 1.3s forwards;
+}
+/* La interfaz aparece mientras el splash se desvanece (fundido cruzado). */
+.app-shell-reveal {
+  animation: shell-reveal 0.5s ease-out 1.25s both;
+}
+/* Visita repetida en la sesión: el script de <head> omite el splash antes del primer pintado. */
+[data-splash="skip"] .splash-overlay {
+  display: none;
+}
+[data-splash="skip"] .app-shell-reveal {
+  animation: none;
 }
 .animate-fade-up {
   animation: fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;

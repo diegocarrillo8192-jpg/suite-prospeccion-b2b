@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { AppStateProvider, useAppState } from "./app-state";
 import { SplashScreen } from "./splash-screen";
 import { MobileNav, Sidebar } from "./header";
@@ -11,9 +11,17 @@ import { Connectors } from "./connectors";
 import { Guide } from "./guide";
 import { Toaster } from "./ui";
 
-const SPLASH_KEY = "b2b.splash.seen";
+declare global {
+  interface Window {
+    /** Decisión del script de <head> (layout.tsx): reproducir u omitir el splash. */
+    __b2bSplash?: "play" | "skip";
+  }
+}
 
-function AppShell() {
+/** Respaldo por si el navegador no emite `animationend` (pestaña en segundo plano, jsdom). */
+const SPLASH_FALLBACK_MS = 2400;
+
+function AppShell({ revealing }: { revealing: boolean }) {
   const { tab } = useAppState();
 
   useEffect(() => {
@@ -21,7 +29,11 @@ function AppShell() {
   }, [tab]);
 
   return (
-    <div className="relative flex min-h-screen">
+    <div
+      className={`relative flex min-h-screen ${revealing ? "app-shell-reveal" : ""}`}
+      inert={revealing}
+      aria-hidden={revealing || undefined}
+    >
       <div className="app-backdrop" aria-hidden="true" />
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
@@ -42,27 +54,25 @@ function AppShell() {
 }
 
 export function App() {
-  const [booting, setBooting] = useState(false);
+  // El splash forma parte del HTML del servidor: es lo primero que se pinta y
+  // la interfaz queda oculta (CSS) hasta que termina la animación.
+  const [splash, setSplash] = useState(true);
 
-  useEffect(() => {
-    let seen = true;
-    try {
-      seen = window.sessionStorage.getItem(SPLASH_KEY) === "1";
-      window.sessionStorage.setItem(SPLASH_KEY, "1");
-    } catch {
-      // sin sessionStorage
+  useLayoutEffect(() => {
+    if (window.__b2bSplash === "skip") {
+      document.documentElement.setAttribute("data-splash", "skip");
+      /* eslint-disable-next-line react-hooks/set-state-in-effect -- sincroniza con la decisión del script de <head> antes del pintado */
+      setSplash(false);
+      return;
     }
-    if (seen) return;
-    /* eslint-disable-next-line react-hooks/set-state-in-effect -- splash solo en la primera visita de la sesión */
-    setBooting(true);
-    const t = setTimeout(() => setBooting(false), 1800);
+    const t = setTimeout(() => setSplash(false), SPLASH_FALLBACK_MS);
     return () => clearTimeout(t);
   }, []);
 
   return (
     <AppStateProvider>
-      {booting && <SplashScreen />}
-      <AppShell />
+      {splash && <SplashScreen onFinish={() => setSplash(false)} />}
+      <AppShell revealing={splash} />
     </AppStateProvider>
   );
 }
